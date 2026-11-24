@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+/*
+  视觉方向：「错题本」。灰白方格纸 + 蓝墨水正文 + 红笔批改 + 荧光笔标重点。
+  唯一的表现性元素是红笔批注（楷体、波浪下划线、圈出的分数），其余保持安静。
+*/
+@theme {
+  --color-paper: #f3f5f0;
+  --color-sheet: #ffffff;
+  --color-grid: #e4e8df;
+  --color-rule: #d8ddd2;
+  --color-ink: #1f2a37;
+  --color-ink-soft: #5b6573;
+  --color-ink-faint: #8a929c;
+  --color-pen: #24426b;
+  --color-pen-soft: #e6ecf4;
+  --color-red: #c8412f;
+  --color-red-soft: #fbe9e5;
+  --color-mark: #ffe97a;
+  --color-ok: #2f8f5b;
+  --color-ok-soft: #e3f2e8;
+  --color-warn: #b7791f;
+  --color-warn-soft: #fdf3dc;
+  --color-me: #95ec69;
+  --color-them: #ffffff;
+
+  --font-sans: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  --font-kai: "LXGW WenKai", "霞鹜文楷", "KaiTi", "STKaiti", "楷体", serif;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 方格纸，只铺在主内容区背景上 */
+.grid-paper {
+  background-color: var(--color-paper);
+  background-image:
+    linear-gradient(var(--color-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-grid) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-position: -1px -1px;
+}
+
+/* 红笔批注 */
+.red-note { font-family: var(--font-kai); color: var(--color-red); font-size: 15px; line-height: 1.5; }
+.red-wave { text-decoration: underline wavy var(--color-red); text-decoration-thickness: 1.5px; text-underline-offset: 5px; }
+.marker { background: linear-gradient(transparent 55%, color-mix(in srgb, var(--color-mark) 85%, transparent) 55%); }
+
+/* 圈出来的分数 */
+.score-ring {
+  font-family: var(--font-kai);
+  color: var(--color-red);
+  border: 2.5px solid var(--color-red);
+  border-radius: 50% 46% 52% 48% / 48% 52% 46% 50%;
+  transform: rotate(-6deg);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+
+.kai { font-family: var(--font-kai); }
+
+:focus-visible { outline: 2px solid var(--color-pen); outline-offset: 2px; }
+
+/* 回忆卡翻面：唯一的编排动效 */
+.flip { perspective: 1400px; }
+.flip-inner { transition: transform 260ms ease; transform-style: preserve-3d; display: grid; }
+.flip-inner.flipped { transform: rotateY(180deg); }
+.flip-face { grid-area: 1 / 1; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.flip-back { transform: rotateY(180deg); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; }
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #cdd3c8; border-radius: 6px; border: 2px solid var(--color-paper); }
+::-webkit-scrollbar-track { background: transparent; }
+
+textarea, input, select { font: inherit; color: inherit; }
