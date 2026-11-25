@@ -77,19 +77,52 @@ pub struct ApiResp {
     pub data_owner: Option<String>,
 }
 
-pub fn client() -> reqwest::Client {
-    reqwest::Client::builder()
+const BAD_CA: &str = "证书文件不对。请选择管理员给你的根证书文件（一般叫 root.crt）";
+
+/// 检查用户导入的根证书（服务器用自签名证书时需要）：只接受一张 PEM 格式的证书
+pub fn parse_ca(pem: &str) -> Result<reqwest::Certificate, String> {
+    let p = pem.trim();
+    if p.len() > 16 * 1024
+        || !p.starts_with("-----BEGIN CERTIFICATE-----")
+        || !p.ends_with("-----END CERTIFICATE-----")
+        || p.matches("-----BEGIN").count() != 1
+    {
+        return Err(BAD_CA.into());
+    }
+    reqwest::Certificate::from_pem(p.as_bytes()).map_err(|_| BAD_CA.to_string())
+}
+
+/// 网络客户端。ca：额外信任的根证书（只用于连这台服务器），系统自带的正式证书机构仍然信任
+pub fn client(ca: Option<&str>) -> Result<reqwest::Client, String> {
+    let mut b = reqwest::Client::builder()
         .timeout(Duration::from_secs(300))
         .connect_timeout(Duration::from_secs(20))
         // 不跟随重定向：防止请求和令牌被带到别的地址
         .redirect(reqwest::redirect::Policy::none())
-        .user_agent(concat!("LoveMemo-Desktop/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .expect("无法创建网络客户端")
+        .user_agent(concat!("LoveMemo-Desktop/", env!("CARGO_PKG_VERSION")));
+    if let Some(pem) = ca {
+        b = b.add_root_certificate(parse_ca(pem)?);
+    }
+    b.build().map_err(|_| BAD_CA.to_string())
+}
+
+/// 证书没通过检查（自签名、过期、名字对不上）
+fn is_cert_error(e: &reqwest::Error) -> bool {
+    let mut src: Option<&dyn std::error::Error> = Some(e);
+    while let Some(x) = src {
+        let t = x.to_string().to_ascii_lowercase();
+        if t.contains("certificate") || t.contains("unknownissuer") {
+            return true;
+        }
+        src = x.source();
+    }
+    false
 }
 
 fn net_err(e: reqwest::Error, base: &Url) -> String {
-    if e.is_timeout() {
+    if is_cert_error(&e) {
+        "服务器的证书没有通过检查，为了安全先不连接。如果管理员说服务器用的是自己签发的证书，请在登录页点「更换」，导入他给你的证书文件；如果没听说过，先别登录，问问管理员。".into()
+    } else if e.is_timeout() {
         "连接服务器超时了，请稍后再试".into()
     } else if e.is_connect() {
         format!("连不上服务器 {}，请检查网络或服务器地址", base.host_str().unwrap_or(""))
@@ -194,6 +227,9 @@ pub async fn login(client: &reqwest::Client, base: &Url, username: &str, passwor
 mod tests {
     use super::*;
 
+    /// 测试用的自签名根证书（只有证书，没有私钥）
+    const TEST_CA: &str = "-----BEGIN CERTIFICATE-----\nMIIBpjCCAU2gAwIBAgIUPOsDH88Iyp0tfWd7/rP8QaXSJPUwCgYIKoZIzj0EAwIw\nIDEeMBwGA1UEAwwVTG92ZU1lbW8gVGVzdCBSb290IENBMCAXDTI2MTEyNTA2MDEz\nMVoYDzIxMjYxMTAxMDYwMTMxWjAgMR4wHAYDVQQDDBVMb3ZlTWVtbyBUZXN0IFJv\nb3QgQ0EwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQEHgENxNComdKD7S0aRSMT\nvSFiawBWd9CTbdCKhBe5SktVc2vH5CjKg7XGCv0+uqF6kpzfda0gzfyuIJ/sVZXp\no2MwYTAdBgNVHQ4EFgQUxYbbgL78A65eshiH8AnEGwFs9AAwHwYDVR0jBBgwFoAU\nxYbbgL78A65eshiH8AnEGwFs9AAwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8E\nBAMCAQYwCgYIKoZIzj0EAwIDRwAwRAIgSD1nQw5TVIZvGw2T59gV6m2IAAad9w0w\nEZwkF7wjX10CIBMWmg9ASkVROS66zOLGJDt6JYMxMSyOcPHQpj13msuT\n-----END CERTIFICATE-----";
+
     #[test]
     fn server_url_rules() {
         let n = |s: &str| normalize_server_url(s, false);
@@ -215,6 +251,20 @@ mod tests {
         assert!(n("ftp://memo.example.com").is_err());
         assert!(n("file:///etc/passwd").is_err());
         assert!(n("").is_err());
+        assert_eq!(n("47.100.1.2:8443").unwrap().as_str(), "https://47.100.1.2:8443/");
+    }
+
+    #[test]
+    fn ca_rules() {
+        assert!(client(None).is_ok());
+        for bad in ["", "hello", "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----",
+                    "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----"] {
+            assert!(client(Some(bad)).is_err(), "{bad}");
+        }
+        let two = format!("{TEST_CA}\n{TEST_CA}");
+        assert!(client(Some(&two)).is_err());
+        assert!(client(Some(&"A".repeat(20000))).is_err());
+        assert!(client(Some(TEST_CA)).is_ok());
     }
 
     #[test]

@@ -1,5 +1,5 @@
 // 服务端入口：node server/src/main.ts
-import { loadConfig } from './config.ts'
+import { loadConfig, modeLabel } from './config.ts'
 import { createContext, createHttpServer, prepareSetupCode } from './app.ts'
 import { usableModels } from './providers.ts'
 
@@ -25,6 +25,18 @@ if (cfg.plainHttp) {
   ].join('\n'))
 }
 
+if (cfg.accessMode === 'https-ip') {
+  console.log([
+    '',
+    `[https-ip] 访问地址 ${cfg.publicOrigin}`,
+    '证书由前面的 Caddy 负责：先向 Let\'s Encrypt 申请 IP 证书（需要 80 端口能从公网访问），',
+    '申请不到时自动改用自签名证书，浏览器会提示"不安全"。查看是哪一种：',
+    '    docker compose -f deploy/docker-compose.yml logs caddy-ip',
+    '自签名时怎么让浏览器和桌面版信任，见 deploy/DEPLOY.md「https + IP + 端口」。',
+    '',
+  ].join('\n'))
+}
+
 const ctx = await createContext(cfg)
 const code = prepareSetupCode(ctx)
 if (code) {
@@ -44,7 +56,7 @@ if (code) {
 
 const server = createHttpServer(ctx)
 server.listen(cfg.port, cfg.host, () => {
-  console.log(`[server] LoveMemo 已启动：监听 ${cfg.host}:${cfg.port}，对外地址 ${cfg.publicOrigin}，已开启模型 ${usableModels(ctx).length} 个${cfg.allowPrivateLlm ? '（允许内网模型地址）' : ''}`)
+  console.log(`[server] LoveMemo 已启动：监听 ${cfg.host}:${cfg.port}，访问方式 ${modeLabel(cfg.accessMode)}，对外地址 ${cfg.publicOrigin}，已开启模型 ${usableModels(ctx).length} 个${cfg.allowPrivateLlm ? '（允许内网模型地址）' : ''}`)
 })
 
 function shutdown() {

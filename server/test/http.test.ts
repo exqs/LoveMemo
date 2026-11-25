@@ -199,6 +199,34 @@ test('配置：缺少密钥、密钥太弱、没有明确选择 http 却用了 h
     assert.throws(() => loadConfig({ SCHEME: 'https', DOMAIN: bad, DATA_KEY: good }), bad)
   }
   assert.throws(() => loadConfig({ SCHEME: 'https', PUBLIC_ORIGIN: 'http://memo.test', DATA_KEY: good }), /不一致/)
+
+  // ACCESS_MODE（来自 COMPOSE_PROFILES）的三种方式
+  const m1 = loadConfig({ ACCESS_MODE: 'https', DOMAIN: 'memo.test', DATA_KEY: good })
+  assert.equal(m1.publicOrigin, 'https://memo.test')
+  assert.equal(m1.accessMode, 'https')
+  const m2 = loadConfig({ ACCESS_MODE: 'http', DOMAIN: 'memo.test', DATA_KEY: good })
+  assert.equal(m2.publicOrigin, 'http://memo.test')
+  assert.equal(m2.plainHttp, true)
+  const m3 = loadConfig({ ACCESS_MODE: 'https-ip', SERVER_IP: '47.100.1.2', DATA_KEY: good })
+  assert.equal(m3.publicOrigin, 'https://47.100.1.2:8443')
+  assert.equal(m3.publicHost, '47.100.1.2:8443')
+  assert.equal(m3.secureCookies, true)
+  assert.equal(m3.plainHttp, false)
+  const m3b = loadConfig({ ACCESS_MODE: 'https-ip', SERVER_IP: '47.100.1.2', HTTPS_PORT: '9443', DOMAIN: 'ignored.test', DATA_KEY: good })
+  assert.equal(m3b.publicOrigin, 'https://47.100.1.2:9443')
+  assert.equal(loadConfig({ ACCESS_MODE: 'https-ip', SERVER_IP: '47.100.1.2', HTTPS_PORT: '443', DATA_KEY: good }).publicOrigin, 'https://47.100.1.2')
+  for (const ip of ['', 'memo.test', '47.100.1', '47.100.1.256', '47.100.1.2:8443', '::1', ' 1.2.3.4 x']) {
+    assert.throws(() => loadConfig({ ACCESS_MODE: 'https-ip', SERVER_IP: ip, DATA_KEY: good }), /SERVER_IP/, ip)
+  }
+  for (const port of ['80', '0', '70000', 'abc', '8443.5']) {
+    assert.throws(() => loadConfig({ ACCESS_MODE: 'https-ip', SERVER_IP: '47.100.1.2', HTTPS_PORT: port, DATA_KEY: good }), /HTTPS_PORT/, port)
+  }
+  assert.throws(() => loadConfig({ ACCESS_MODE: 'https', DOMAIN: '47.100.1.2', DATA_KEY: good }), /https-ip/)
+  assert.throws(() => loadConfig({ ACCESS_MODE: 'https', DATA_KEY: good }), /DOMAIN/)
+  for (const bad of ['https,http', 'https-ip,http', 'constructor', 'toString', 'HTTPS IP']) {
+    assert.throws(() => loadConfig({ ACCESS_MODE: bad, DOMAIN: 'memo.test', SERVER_IP: '47.100.1.2', DATA_KEY: good }), /只能是/, bad)
+  }
+  assert.throws(() => loadConfig({ ACCESS_MODE: 'https-ip', SCHEME: 'http', SERVER_IP: '47.100.1.2', DATA_KEY: good }), /不一致/)
   assert.throws(() => loadConfig({ SCHEME: 'http', PUBLIC_ORIGIN: 'https://memo.test', DATA_KEY: good }), /不一致/)
 })
 
@@ -227,6 +255,29 @@ test('http 模式：登录、改数据、CSRF 校验照常工作；Cookie 不带
     assert.equal(noHeader.status, 403)
     const https = await s.req('/api/auth/logout', { method: 'POST', cookie, headers: { origin: 'https://memo.test' } })
     assert.equal(https.status, 403)
+  } finally { await s.close() }
+})
+
+test('https-ip 模式：Host 和 Origin 带端口，校验照常', async () => {
+  const s = await startServer({ PUBLIC_ORIGIN: '', ACCESS_MODE: 'https-ip', SERVER_IP: '47.100.1.2', HTTPS_PORT: '8443' })
+  try {
+    assert.equal(s.ctx.cfg.publicHost, '47.100.1.2:8443')
+    // 默认的 memo.test Host 头不对
+    assert.equal((await s.req('/api/auth/state')).status, 421)
+    const host = { host: '47.100.1.2:8443' }
+    assert.equal((await s.req('/api/auth/state', { headers: host })).status, 200)
+    // 不带端口的 IP 也不行（防止绕过）
+    assert.equal((await s.req('/api/auth/state', { headers: { host: '47.100.1.2' } })).status, 421)
+    const st = await s.req('/api/auth/setup', { headers: { ...host, origin: 'https://47.100.1.2:8443' }, json: { setupCode: s.setupCode, ...ADMIN } })
+    assert.equal(st.status, 201)
+    const lr = await s.req('/api/auth/login', { headers: host, json: { username: ADMIN.username, password: ADMIN.password } })
+    assert.equal(lr.status, 200)
+    assert.match(String(lr.headers['set-cookie']), /^__Host-lm_sid=.*Secure/)
+    const cookie = sessionCookie(lr)
+    const wrongPort = await s.req('/api/auth/logout', { method: 'POST', cookie, headers: { ...host, origin: 'https://47.100.1.2:9443' } })
+    assert.equal(wrongPort.status, 403)
+    const ok = await s.req('/api/auth/logout', { method: 'POST', cookie, headers: { ...host, origin: 'https://47.100.1.2:8443' }, json: {} })
+    assert.equal(ok.status, 200)
   } finally { await s.close() }
 })
 

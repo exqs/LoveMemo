@@ -1,0 +1,42 @@
+# https + IP + 端口（COMPOSE_PROFILES=https-ip）：用 https://服务器IP:端口 访问，不需要域名。
+# 证书：先向 Let's Encrypt 申请 IP 证书（有效期约 6 天，Caddy 自动续期），
+# 验证时 Let's Encrypt 会从公网访问这台服务器的 80 端口，所以 80 端口必须能访问。
+# 申请不到时自动改用 Caddy 自己签发的证书（自签名），浏览器会提示"不安全"，
+# 之后 Caddy 会定期重新尝试 Let's Encrypt，成功后自动换成正式证书。见 DEPLOY.md。
+{
+	# 浏览器用 IP 访问时不发送 SNI，用它来选证书
+	default_sni {$SERVER_IP}
+	# 容器里没有系统证书库可装，不需要
+	skip_install_trust
+	servers {
+		max_header_size 16KB
+	}
+}
+
+https://{$SERVER_IP}:{$HTTPS_PORT} {
+	tls {
+		issuer acme {
+			dir https://acme-v02.api.letsencrypt.org/directory
+			# Let's Encrypt 只在 shortlived 这个配置下签发 IP 证书
+			profile shortlived
+			# 只用 80 端口验证；443 端口可能被别的程序占用
+			disable_tlsalpn_challenge
+		}
+		issuer internal
+	}
+	encode zstd gzip
+	request_body {
+		max_size 60MB
+	}
+	reverse_proxy app:8787 {
+		header_up X-Forwarded-For {remote_host}
+		header_up -X-Real-IP
+	}
+	header {
+		-Server
+	}
+	log {
+		output stdout
+		format console
+	}
+}

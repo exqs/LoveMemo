@@ -203,7 +203,7 @@ function AuthGate() {
   }, [user])
 
   if (phase.k === 'loading') return <Loading />
-  if (phase.k === 'error') return <Fatal text={`连不上服务器：${phase.msg}`} retry={() => { void load() }} />
+  if (phase.k === 'error') return <Fatal text={`连不上服务器：${phase.msg}`} retry={() => { void load() }} onChangeServer={isTauri ? () => setPhase({ k: 'server' }) : undefined} />
   if (phase.k === 'server') return <ServerScreen onDone={() => { void load() }} />
   if (phase.k === 'auth') {
     return <AuthScreen mode={phase.mode} onDone={(u) => setPhase({ k: 'ready', user: u })} onChangeServer={isTauri ? () => setPhase({ k: 'server' }) : undefined} />

@@ -104,8 +104,52 @@ export const sessions = () => json<{ sessions: { current: boolean; kind: string;
 
 // ---------- 桌面版：服务器地址 ----------
 export const getServerUrl = () => (isTauri ? invoke<string | null>('server_get_url') : Promise.resolve(location.origin))
-/** allowHttp：用户已经确认可以用不加密的 http 地址 */
-export const setServerUrl = (url: string, allowHttp = false) => invoke<string>('server_set_url', { url, allowHttp })
+/**
+ * allowHttp：用户已经确认可以用不加密的 http 地址。
+ * ca：不传 = 同一台服务器保留已导入的证书；'' = 清掉；PEM 文本 = 导入这张根证书（服务器用自签名证书时）
+ */
+export const setServerUrl = (url: string, allowHttp = false, ca?: string) => invoke<string>('server_set_url', { url, allowHttp, ca })
+export const getServerCa = () => invoke<string | null>('server_get_ca')
+
+/** 证书文件（PEM 或 DER）→ PEM 文本 */
+export function certToPem(bytes: Uint8Array): string {
+  const text = new TextDecoder().decode(bytes).trim()
+  if (text.startsWith('-----BEGIN')) return text
+  let bin = ''
+  for (const b of bytes) bin += String.fromCharCode(b)
+  const b64 = btoa(bin).replace(/(.{64})/g, '$1\n').trim()
+  return `-----BEGIN CERTIFICATE-----\n${b64}\n-----END CERTIFICATE-----`
+}
+
+/** 粗略检查 DER：外层和第一个元素都是 SEQUENCE，长度对得上（真正的校验在桌面端 Rust 里） */
+function looksLikeCert(d: Uint8Array): boolean {
+  const seq = (i: number): [number, number] | null => {
+    if (d[i] !== 0x30) return null
+    const b = d[i + 1]
+    if (b === undefined) return null
+    if (b < 0x80) return [i + 2, b]
+    const n = b & 0x7f
+    if (n < 1 || n > 3) return null
+    let len = 0
+    for (let k = 0; k < n; k++) { const x = d[i + 2 + k]; if (x === undefined) return null; len = len * 256 + x }
+    return [i + 2 + n, len]
+  }
+  const outer = seq(0)
+  if (!outer || outer[0] + outer[1] !== d.length) return false
+  const tbs = seq(outer[0])
+  return !!tbs && tbs[0] + tbs[1] < d.length
+}
+
+/** 证书的 SHA-256 指纹，格式和 openssl x509 -fingerprint -sha256 一样（AB:CD:…） */
+export async function certFingerprint(pem: string): Promise<string> {
+  const m = pem.match(/-----BEGIN CERTIFICATE-----([\s\S]+?)-----END CERTIFICATE-----/)
+  if (!m) throw new Error('这不是证书文件')
+  let der: Uint8Array<ArrayBuffer>
+  try { der = Uint8Array.from(atob(m[1].replace(/\s+/g, '')), (c) => c.charCodeAt(0)) } catch { throw new Error('这不是证书文件') }
+  if (!looksLikeCert(der)) throw new Error('这不是证书文件')
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', der))
+  return Array.from(h, (b) => b.toString(16).padStart(2, '0').toUpperCase()).join(':')
+}
 
 const LOOPBACK = ['localhost', '127.0.0.1', '[::1]']
 /** 不加密的 http 地址（本机调试除外）。没写协议的按 https 算 */

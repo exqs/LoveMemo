@@ -1,5 +1,5 @@
 # 用法（在项目根目录）：
-#   cp deploy/.env.example deploy/.env           # 选访问方式（https/http），填域名和密钥
+#   cp deploy/.env.example deploy/.env           # 选访问方式（https-ip / https / http），填 IP 或域名、密钥
 #   docker compose -f deploy/docker-compose.yml up -d --build
 #   docker compose -f deploy/docker-compose.yml logs app   # 第一次启动时这里有安装码
 name: lovememo
@@ -12,9 +12,9 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      # 访问方式跟着 COMPOSE_PROFILES 走，保证应用和前面的 Caddy 用的是同一种
-      SCHEME: ${COMPOSE_PROFILES:?在 deploy/.env 里设置 COMPOSE_PROFILES=https 或 http}
-      DOMAIN: ${DOMAIN:?在 deploy/.env 里设置 DOMAIN}
+      # 访问方式跟着 COMPOSE_PROFILES 走，保证应用和前面的 Caddy 用的是同一种。
+      # DOMAIN / SERVER_IP / HTTPS_PORT 从 .env 读，缺了哪个应用启动时会说
+      ACCESS_MODE: ${COMPOSE_PROFILES:?在 deploy/.env 里设置 COMPOSE_PROFILES=https-ip、https 或 http}
       TRUST_PROXY: "1"
     volumes:
       - app-data:/data
@@ -28,7 +28,30 @@ services:
     mem_limit: 1g
     pids_limit: 200
 
-  # https 模式：自动申请证书，需要 80 和 443 端口
+  # https + IP + 端口（默认）：不需要域名。80 端口用来申请证书，HTTPS_PORT 是访问端口
+  caddy-ip:
+    image: caddy:2
+    profiles: [https-ip]
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"
+      - "${HTTPS_PORT:-8443}:${HTTPS_PORT:-8443}"
+      - "${HTTPS_PORT:-8443}:${HTTPS_PORT:-8443}/udp"
+    environment:
+      SERVER_IP: ${SERVER_IP:-}
+      HTTPS_PORT: ${HTTPS_PORT:-8443}
+    volumes:
+      - ./Caddyfile.ip:/etc/caddy/Caddyfile:ro
+      # 证书和自签名用的根证书都在这里，不要删，删了自签名的根证书会变，大家要重新信任
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [internal]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+
+  # https + 域名：自动申请证书，需要 80 和 443 端口
   caddy:
     image: caddy:2
     profiles: [https]

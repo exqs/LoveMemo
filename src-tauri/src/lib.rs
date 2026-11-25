@@ -64,6 +64,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             api::server_get_url,
             api::server_set_url,
+            api::server_get_ca,
             api::api_call,
             api::api_login,
             api::api_logout,
