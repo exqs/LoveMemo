@@ -8,8 +8,12 @@ use url::Url;
 
 const MAX_RESP: u64 = 600 * 1024 * 1024;
 
-/// 用户填的服务器地址 → 只保留协议、域名、端口。公网必须 https，只有本机调试允许 http
-pub fn normalize_server_url(input: &str) -> Result<Url, String> {
+/// http 地址没有被用户确认时返回的错误，前端据此显示"连接不加密"的确认框
+pub const NEED_HTTP_CONFIRM: &str = "这个地址是 http 开头的，连接不加密。确认要连接的话，请先勾选下面的确认框";
+
+/// 用户填的服务器地址 → 只保留协议、域名、端口。
+/// 没写协议时按 https 处理；不是本机的 http 地址必须由用户明确确认（allow_http）才接受
+pub fn normalize_server_url(input: &str, allow_http: bool) -> Result<Url, String> {
     let s = input.trim();
     if s.is_empty() {
         return Err("请填写服务器地址".into());
@@ -29,8 +33,9 @@ pub fn normalize_server_url(input: &str) -> Result<Url, String> {
     let loopback = host == "localhost" || host == "127.0.0.1" || host == "[::1]";
     match u.scheme() {
         "https" => {}
-        "http" if loopback => {}
-        _ => return Err("为了保护密码和数据，服务器地址必须是 https 开头".into()),
+        "http" if loopback || allow_http => {}
+        "http" => return Err(NEED_HTTP_CONFIRM.into()),
+        _ => return Err("服务器地址要以 https:// 或 http:// 开头".into()),
     }
     Url::parse(&format!("{}/", u.origin().ascii_serialization())).map_err(|e| e.to_string())
 }
@@ -191,17 +196,25 @@ mod tests {
 
     #[test]
     fn server_url_rules() {
-        assert_eq!(normalize_server_url("memo.example.com").unwrap().as_str(), "https://memo.example.com/");
-        assert_eq!(normalize_server_url(" https://memo.example.com/ ").unwrap().as_str(), "https://memo.example.com/");
-        assert_eq!(normalize_server_url("https://memo.example.com:8443").unwrap().as_str(), "https://memo.example.com:8443/");
-        assert!(normalize_server_url("http://memo.example.com").is_err());
-        assert!(normalize_server_url("http://localhost:1420").is_ok());
-        assert!(normalize_server_url("https://a:b@memo.example.com").is_err());
-        assert!(normalize_server_url("https://memo.example.com/x").is_err());
-        assert!(normalize_server_url("https://memo.example.com/?a=1").is_err());
-        assert!(normalize_server_url("ftp://memo.example.com").is_err());
-        assert!(normalize_server_url("file:///etc/passwd").is_err());
-        assert!(normalize_server_url("").is_err());
+        let n = |s: &str| normalize_server_url(s, false);
+        assert_eq!(n("memo.example.com").unwrap().as_str(), "https://memo.example.com/");
+        assert_eq!(n(" https://memo.example.com/ ").unwrap().as_str(), "https://memo.example.com/");
+        assert_eq!(n("https://memo.example.com:8443").unwrap().as_str(), "https://memo.example.com:8443/");
+        assert_eq!(n("http://memo.example.com").unwrap_err(), NEED_HTTP_CONFIRM);
+        assert!(n("http://localhost:1420").is_ok());
+        // 用户确认过的 http 地址
+        assert_eq!(normalize_server_url("http://memo.example.com", true).unwrap().as_str(), "http://memo.example.com/");
+        assert_eq!(normalize_server_url("http://10.0.0.5/", true).unwrap().as_str(), "http://10.0.0.5/");
+        // 确认 http 不放宽其他规则
+        for bad in ["http://a:b@memo.example.com", "http://memo.example.com/x", "ftp://memo.example.com", "file:///etc/passwd", ""] {
+            assert!(normalize_server_url(bad, true).is_err(), "{bad}");
+        }
+        assert!(n("https://a:b@memo.example.com").is_err());
+        assert!(n("https://memo.example.com/x").is_err());
+        assert!(n("https://memo.example.com/?a=1").is_err());
+        assert!(n("ftp://memo.example.com").is_err());
+        assert!(n("file:///etc/passwd").is_err());
+        assert!(n("").is_err());
     }
 
     #[test]
@@ -217,7 +230,7 @@ mod tests {
         assert!(check_path("/api/%2e%2e/x").is_err());
         assert!(check_path("/index.html").is_err());
         assert!(check_path("https://evil.com/api/data").is_err());
-        let base = normalize_server_url("https://memo.example.com").unwrap();
+        let base = normalize_server_url("https://memo.example.com", false).unwrap();
         assert_eq!(base.join("/api/data").unwrap().as_str(), "https://memo.example.com/api/data");
     }
 

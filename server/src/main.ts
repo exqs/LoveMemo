@@ -12,6 +12,19 @@ try { cfg = loadConfig() } catch (e) {
   process.exit(1)
 }
 
+if (cfg.plainHttp) {
+  console.warn([
+    '',
+    '!!!!!!!!!!!!!!!! 注意：现在是 http 访问（不加密） !!!!!!!!!!!!!!!!',
+    `对外地址 ${cfg.publicOrigin}`,
+    '密码、登录凭证、聊天记录和管理员填写的 API Key 在网络上都是明文传输，',
+    '同一个 Wi-Fi、运营商或中间任何一台设备都能看到甚至篡改。',
+    '只适合内网或临时测试。要放到公网长期用，请改成 https（见 deploy/DEPLOY.md）。',
+    '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
+    '',
+  ].join('\n'))
+}
+
 const ctx = await createContext(cfg)
 const code = prepareSetupCode(ctx)
 if (code) {

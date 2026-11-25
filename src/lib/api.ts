@@ -104,7 +104,19 @@ export const sessions = () => json<{ sessions: { current: boolean; kind: string;
 
 // ---------- 桌面版：服务器地址 ----------
 export const getServerUrl = () => (isTauri ? invoke<string | null>('server_get_url') : Promise.resolve(location.origin))
-export const setServerUrl = (url: string) => invoke<string>('server_set_url', { url })
+/** allowHttp：用户已经确认可以用不加密的 http 地址 */
+export const setServerUrl = (url: string, allowHttp = false) => invoke<string>('server_set_url', { url, allowHttp })
+
+const LOOPBACK = ['localhost', '127.0.0.1', '[::1]']
+/** 不加密的 http 地址（本机调试除外）。没写协议的按 https 算 */
+export function isPlainHttpUrl(u: string | null | undefined): boolean {
+  const t = u?.trim()
+  if (!t) return false
+  try {
+    const x = new URL(t.includes('://') ? t : `https://${t}`)
+    return x.protocol === 'http:' && !LOOPBACK.includes(x.hostname)
+  } catch { return false }
+}
 
 // ---------- 数据 ----------
 export async function dataGet(): Promise<{ version: number; owner: string; bytes: Uint8Array | null }> {

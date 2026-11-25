@@ -83,7 +83,7 @@ export async function startServer(env: Record<string, string> = {}): Promise<Tes
 export function sessionCookie(res: Res): string {
   const sc = res.headers['set-cookie']
   const list = Array.isArray(sc) ? sc : sc ? [sc] : []
-  const c = list.find((x) => x.startsWith('__Host-lm_sid='))
+  const c = list.find((x) => x.startsWith('__Host-lm_sid=') || x.startsWith('lm_sid='))
   if (!c) throw new Error('没有会话 Cookie')
   return c.split(';')[0]
 }

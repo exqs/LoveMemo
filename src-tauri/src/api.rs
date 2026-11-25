@@ -22,7 +22,10 @@ pub fn init(app: &AppHandle) -> ServerState {
         .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .and_then(|v| v.get("url").and_then(|u| u.as_str()).map(str::to_string))
-        .and_then(|u| api_core::normalize_server_url(&u).ok());
+        .and_then(|u| {
+            // 只有用户确认过的地址才会被保存，所以这里接受 http
+            api_core::normalize_server_url(&u, true).ok()
+        });
     ServerState { url: Mutex::new(url), file, client: api_core::client() }
 }
 
@@ -36,8 +39,8 @@ pub fn server_get_url(state: State<'_, ServerState>) -> Option<String> {
 }
 
 #[tauri::command]
-pub fn server_set_url(state: State<'_, ServerState>, url: String) -> Result<String, String> {
-    let u = api_core::normalize_server_url(&url)?;
+pub fn server_set_url(state: State<'_, ServerState>, url: String, allow_http: Option<bool>) -> Result<String, String> {
+    let u = api_core::normalize_server_url(&url, allow_http.unwrap_or(false))?;
     let mut cur = state.url.lock().unwrap();
     if let Some(old) = cur.as_ref() {
         if old.origin() != u.origin() {

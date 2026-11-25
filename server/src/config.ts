@@ -8,6 +8,8 @@ export interface Config {
   publicOrigin: string
   publicHost: string
   secureCookies: boolean
+  /** 不加密的 http，而且不是本机调试（启动时提醒，部分只在 https 下有意义的响应头不发） */
+  plainHttp: boolean
   dataDir: string
   staticDir: string
   /** 允许 AI 服务商地址指向内网或本机（例如自己部署的 Ollama）。默认关闭 */
@@ -43,19 +45,42 @@ function parseKey(raw: string | undefined): Buffer {
 }
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]'])
+// 域名或 IPv4，不带端口和路径
+const HOST_RE = /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const originRaw = env.PUBLIC_ORIGIN
-  if (!originRaw) throw new Error('缺少 PUBLIC_ORIGIN，例如 https://memo.example.com')
+/**
+ * 对外地址有两种写法：
+ * 1. SCHEME（https 或 http）+ DOMAIN，Docker 部署用这种
+ * 2. PUBLIC_ORIGIN 完整地址，本机开发和测试用
+ * 不是本机的 http 地址必须明确写 SCHEME=http 才允许，避免误配成不加密
+ */
+function resolveOrigin(env: NodeJS.ProcessEnv): URL {
+  const scheme = env.SCHEME?.trim().toLowerCase() || undefined
+  if (scheme !== undefined && scheme !== 'https' && scheme !== 'http') {
+    throw new Error(`访问方式只能是 https 或 http，现在是「${env.SCHEME}」。Docker 部署请检查 deploy/.env 里的 COMPOSE_PROFILES`)
+  }
+  let raw = env.PUBLIC_ORIGIN?.trim()
+  if (!raw) {
+    const domain = env.DOMAIN?.trim()
+    if (!scheme || !domain) throw new Error('缺少对外地址：请设置 SCHEME（https 或 http）和 DOMAIN，或者直接设置 PUBLIC_ORIGIN')
+    if (!HOST_RE.test(domain)) throw new Error(`DOMAIN 只填域名或 IP，不要带 http://、端口或路径。现在是「${domain}」`)
+    raw = `${scheme}://${domain}`
+  }
   let origin: URL
-  try { origin = new URL(originRaw) } catch { throw new Error('PUBLIC_ORIGIN 不是合法地址') }
+  try { origin = new URL(raw) } catch { throw new Error('PUBLIC_ORIGIN 不是合法地址') }
   if (origin.pathname !== '/' || origin.search || origin.hash || origin.username || origin.password) {
     throw new Error('PUBLIC_ORIGIN 只能包含协议、域名和端口，例如 https://memo.example.com')
   }
-  if (origin.protocol !== 'https:') {
-    // 明文 http 只允许本机调试；公网必须 https，否则 Cookie 和密码会被窃听
-    if (origin.protocol !== 'http:' || !LOOPBACK.has(origin.hostname)) throw new Error('PUBLIC_ORIGIN 必须是 https 地址（只有 localhost 调试时可以用 http）')
+  if (origin.protocol !== 'https:' && origin.protocol !== 'http:') throw new Error('PUBLIC_ORIGIN 必须是 https 或 http 地址')
+  if (scheme && origin.protocol !== `${scheme}:`) throw new Error(`SCHEME=${scheme} 和 PUBLIC_ORIGIN=${origin.origin} 的协议不一致`)
+  if (origin.protocol === 'http:' && !LOOPBACK.has(origin.hostname) && scheme !== 'http') {
+    throw new Error('PUBLIC_ORIGIN 是 http 地址，传输不加密。确定要这样用的话请同时设置 SCHEME=http')
   }
+  return origin
+}
+
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  const origin = resolveOrigin(env)
   const dataDir = resolve(env.DATA_DIR || './data')
   return {
     host: env.HOST || '127.0.0.1',
@@ -63,6 +88,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     publicOrigin: origin.origin,
     publicHost: origin.host,
     secureCookies: origin.protocol === 'https:',
+    plainHttp: origin.protocol === 'http:' && !LOOPBACK.has(origin.hostname),
     dataDir,
     staticDir: resolve(env.STATIC_DIR || './dist'),
     allowPrivateLlm: env.ALLOW_PRIVATE_LLM_HOSTS === '1' || env.ALLOW_PRIVATE_LLM_HOSTS === 'true',

@@ -32,10 +32,12 @@ export function securityHeaders(res: ServerResponse, cfg: Config) {
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('X-Frame-Options', 'DENY')
   res.setHeader('Referrer-Policy', 'no-referrer')
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
+  // 浏览器只在 https（或本机）下认这个头，http 下发了只会在控制台报警告
+  if (!cfg.plainHttp) res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()')
-  if (cfg.secureCookies) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+  // 只管本站，不带 includeSubDomains：同一域名下别的子站点以后想用 http 也不受影响
+  if (cfg.secureCookies) res.setHeader('Strict-Transport-Security', 'max-age=31536000')
 }
 
 export function sendJson(res: ServerResponse, status: number, body: unknown) {

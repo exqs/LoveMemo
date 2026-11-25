@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ADMIN, fakeSqlite, registerUser, setupAdmin, startServer } from './helpers.ts'
+import { ADMIN, fakeSqlite, registerUser, sessionCookie, setupAdmin, startServer } from './helpers.ts'
 
 test('跨站请求（CSRF）：缺少自定义头、Origin 不对、Sec-Fetch-Site 是 cross-site 都被拒绝', async () => {
   const s = await startServer()
@@ -165,7 +165,7 @@ test('数据文件被挪到别人的目录下也解不开（加密绑定了用�
   } finally { await s.close() }
 })
 
-test('配置：缺少密钥、密钥太弱、对外地址不是 https 时拒绝启动', async () => {
+test('配置：缺少密钥、密钥太弱、没有明确选择 http 却用了 http 地址时拒绝启动', async () => {
   const { loadConfig } = await import('../src/config.ts')
   const key = Buffer.alloc(32, 9).toString('base64')
   const good = Buffer.from(Array.from({ length: 32 }, (_, i) => i)).toString('base64')
@@ -177,6 +177,57 @@ test('配置：缺少密钥、密钥太弱、对外地址不是 https 时拒绝�
   assert.throws(() => loadConfig({ PUBLIC_ORIGIN: 'https://memo.test', DATA_KEY: good, SCRYPT_LOG_N: '10' }))
   assert.doesNotThrow(() => loadConfig({ PUBLIC_ORIGIN: 'https://memo.test', DATA_KEY: good }))
   assert.doesNotThrow(() => loadConfig({ PUBLIC_ORIGIN: 'http://localhost:1420', DATA_KEY: good }))
+
+  // SCHEME + DOMAIN（Docker 部署的写法）
+  const https = loadConfig({ SCHEME: 'https', DOMAIN: 'Memo.Test', DATA_KEY: good })
+  assert.equal(https.publicOrigin, 'https://memo.test')
+  assert.equal(https.secureCookies, true)
+  const http = loadConfig({ SCHEME: 'http', DOMAIN: 'memo.test', DATA_KEY: good })
+  assert.equal(http.publicOrigin, 'http://memo.test')
+  assert.equal(http.publicHost, 'memo.test')
+  assert.equal(http.secureCookies, false)
+  assert.equal(http.plainHttp, true)
+  assert.equal(https.plainHttp, false)
+  assert.equal(loadConfig({ PUBLIC_ORIGIN: 'http://localhost:1420', DATA_KEY: good }).plainHttp, false)
+  assert.equal(loadConfig({ SCHEME: 'http', DOMAIN: '10.0.0.5', DATA_KEY: good }).publicHost, '10.0.0.5')
+  assert.doesNotThrow(() => loadConfig({ SCHEME: 'http', PUBLIC_ORIGIN: 'http://memo.test', DATA_KEY: good }))
+  assert.throws(() => loadConfig({ DOMAIN: 'memo.test', DATA_KEY: good }), /SCHEME/)
+  assert.throws(() => loadConfig({ SCHEME: 'ftp', DOMAIN: 'memo.test', DATA_KEY: good }), /https 或 http/)
+  assert.throws(() => loadConfig({ SCHEME: 'https,http', DOMAIN: 'memo.test', DATA_KEY: good }), /https 或 http/)
+  assert.throws(() => loadConfig({ SCHEME: 'http', DATA_KEY: good }))
+  for (const bad of ['http://memo.test', 'memo.test:8080', 'memo.test/x', 'a b', 'memo.test@evil.com', '']) {
+    assert.throws(() => loadConfig({ SCHEME: 'https', DOMAIN: bad, DATA_KEY: good }), bad)
+  }
+  assert.throws(() => loadConfig({ SCHEME: 'https', PUBLIC_ORIGIN: 'http://memo.test', DATA_KEY: good }), /不一致/)
+  assert.throws(() => loadConfig({ SCHEME: 'http', PUBLIC_ORIGIN: 'https://memo.test', DATA_KEY: good }), /不一致/)
+})
+
+test('http 模式：登录、改数据、CSRF 校验照常工作；Cookie 不带 Secure，没有 HSTS', async () => {
+  const s = await startServer({ PUBLIC_ORIGIN: 'http://memo.test', SCHEME: 'http' })
+  try {
+    const home = await s.req('/')
+    assert.equal(home.headers['strict-transport-security'], undefined)
+    assert.match(String(home.headers['content-security-policy']), /default-src 'self'/)
+    const st = await s.req('/api/auth/setup', { json: { setupCode: s.setupCode, ...ADMIN } })
+    assert.equal(st.status, 201)
+    const lr = await s.req('/api/auth/login', { json: { username: ADMIN.username, password: ADMIN.password } })
+    assert.equal(lr.status, 200)
+    const set = String(lr.headers['set-cookie'])
+    const cookie = sessionCookie(lr)
+    assert.match(cookie, /^lm_sid=/)
+    assert.ok(!/;\s*Secure/i.test(set), set)
+    assert.match(set, /HttpOnly/)
+    assert.match(set, /SameSite=Strict/)
+    const me = await s.req('/api/auth/state', { cookie })
+    assert.equal(me.status, 200)
+    // 别的网站发来的请求仍然被拒绝（http 下浏览器不带 Sec-Fetch-Site，只靠 Origin 和自定义头）
+    const evil = await s.req('/api/auth/logout', { method: 'POST', cookie, headers: { origin: 'http://evil.test' } })
+    assert.equal(evil.status, 403)
+    const noHeader = await s.req('/api/auth/logout', { method: 'POST', cookie, noCsrfHeader: true })
+    assert.equal(noHeader.status, 403)
+    const https = await s.req('/api/auth/logout', { method: 'POST', cookie, headers: { origin: 'https://memo.test' } })
+    assert.equal(https.status, 403)
+  } finally { await s.close() }
 })
 
 test('没有任何"万能密码"、调试开关或隐藏接口', async () => {

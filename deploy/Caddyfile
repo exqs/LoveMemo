@@ -1,4 +1,5 @@
-# Caddy 自动申请和续期 HTTPS 证书（Let's Encrypt），80 端口自动跳转到 443
+# https 模式（COMPOSE_PROFILES=https）：Caddy 自动申请和续期 HTTPS 证书（Let's Encrypt），80 端口自动跳转到 443。
+# 需要域名已解析到本机，并且 80、443 端口能从公网访问，见 DEPLOY.md
 {
 	servers {
 		# 请求头不超过 16KB，和服务端保持一致

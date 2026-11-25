@@ -5,6 +5,7 @@ import { Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { Button, Chip, Field, Modal, Sheet, Spinner, confirmDialog, cx, errText, inputCls, toast } from '../components/ui'
 import { llmAdmin, type AdminModel, type AdminProvider, type ProbeModel, type RouteKey } from '../lib/api'
 import { invalidateModels } from '../db/misc'
+import { PlainHttpNote, usePlainHttp } from './Auth'
 
 type Protocol = 'openai' | 'anthropic'
 interface Preset { name: string; protocol: Protocol; base_url: string; note?: string }
@@ -173,8 +174,14 @@ function PickFooter({ onCancel }: { onCancel: () => void }) {
 }
 
 function ProviderFields({ v, set, keyHint }: { v: { name: string; protocol: Protocol; base_url: string; api_key: string }; set: (p: Partial<typeof v>) => void; keyHint: string }) {
+  const plain = usePlainHttp()
   return (
     <div className="grid grid-cols-2 gap-3">
+      {plain && (
+        <div className="col-span-2">
+          <PlainHttpNote>现在是 http 访问，连接没有加密，这里填的 API Key 在传到服务器的路上可能被别人看到。建议在服务商那里给这个 Key 设置消费上限，以后换成 https 时再换一个新 Key。</PlainHttpNote>
+        </div>
+      )}
       <Field label="名称"><input className={inputCls} value={v.name} maxLength={40} onChange={(e) => set({ name: e.target.value })} /></Field>
       <Field label="接口协议">
         <select className={inputCls} value={v.protocol} onChange={(e) => set({ protocol: e.target.value as Protocol })}>

@@ -1,0 +1,26 @@
+# http 模式（COMPOSE_PROFILES=http）：只监听 80 端口，不申请证书、不跳转 https。
+# 传输不加密，只适合内网或临时测试，见 DEPLOY.md。
+{
+	auto_https off
+	servers {
+		max_header_size 16KB
+	}
+}
+
+http://{$DOMAIN} {
+	encode zstd gzip
+	request_body {
+		max_size 60MB
+	}
+	reverse_proxy app:8787 {
+		header_up X-Forwarded-For {remote_host}
+		header_up -X-Real-IP
+	}
+	header {
+		-Server
+	}
+	log {
+		output stdout
+		format console
+	}
+}
