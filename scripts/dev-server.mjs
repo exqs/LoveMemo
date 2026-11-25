@@ -10,7 +10,6 @@ const dir = resolve('.dev-data')
 mkdirSync(dir, { recursive: true, mode: 0o700 })
 const keyFile = resolve(dir, 'dev.key')
 if (!existsSync(keyFile)) writeFileSync(keyFile, randomBytes(32).toString('base64'), { mode: 0o600 })
-const modelsFile = existsSync('deploy/models.json') ? 'deploy/models.json' : 'deploy/models.example.json'
 
 const child = spawn(process.execPath, ['server/src/main.ts'], {
   stdio: 'inherit',
@@ -21,7 +20,8 @@ const child = spawn(process.execPath, ['server/src/main.ts'], {
     PUBLIC_ORIGIN: 'http://localhost:1420',
     DATA_DIR: resolve(dir, 'data'),
     DATA_KEY: readFileSync(keyFile, 'utf8').trim(),
-    MODELS_FILE: resolve(modelsFile),
+    // 本机开发时允许连本机的模型（例如 Ollama）
+    ALLOW_PRIVATE_LLM_HOSTS: '1',
     STATIC_DIR: resolve('dist'),
   },
 })

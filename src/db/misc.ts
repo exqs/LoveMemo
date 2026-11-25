@@ -31,13 +31,15 @@ export async function updateCommitment(id: string, patch: Partial<Commitment>) {
 export async function deleteCommitment(id: string) { await run('DELETE FROM commitment WHERE id=?', [id]); emitChange() }
 
 // ---------- 模型配置 ----------
-// 正式使用时模型由管理员在服务器上配置，这里只拿到名称和能力，拿不到地址和 Key。
+// 正式使用时模型由管理员在「管理 → AI 模型」里配置，这里只拿到名称和能力，拿不到地址和 Key。
 // 单文件界面预览没有服务器，读本地表里的示例数据。
 const toProfile = (r: Row): ModelProfile => ({
   ...(r as unknown as ModelProfile), supports_vision: !!r.supports_vision, supports_json: !!r.supports_json,
   needs_key: !!r.needs_key, quirks: parseJSON(r.quirks as string, {}),
 })
 let serverModels: Promise<ModelProfile[]> | null = null
+/** 管理员改了模型配置后调用，下次读取时重新向服务器要 */
+export function invalidateModels() { serverModels = null; emitChange() }
 function fromServer(): Promise<ModelProfile[]> {
   serverModels ??= apiModels().then((r) => r.models.map((m) => ({
     ...m, base_url: '', needs_key: false, created_at: 0,

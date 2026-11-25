@@ -4,7 +4,6 @@ dist-preview
 .git
 .dev-data
 deploy/.env
-deploy/models.json
 src-tauri
 *.tar.gz
 *.db

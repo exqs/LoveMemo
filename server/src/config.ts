@@ -10,7 +10,8 @@ export interface Config {
   secureCookies: boolean
   dataDir: string
   staticDir: string
-  modelsFile: string
+  /** 允许 AI 服务商地址指向内网或本机（例如自己部署的 Ollama）。默认关闭 */
+  allowPrivateLlm: boolean
   /** 32 字节主密钥：用户数据落盘加密 */
   dataKey: Buffer
   /** 反向代理层数。0 = 直接面对公网，不信任 X-Forwarded-For */
@@ -64,7 +65,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     secureCookies: origin.protocol === 'https:',
     dataDir,
     staticDir: resolve(env.STATIC_DIR || './dist'),
-    modelsFile: resolve(env.MODELS_FILE || './models.json'),
+    allowPrivateLlm: env.ALLOW_PRIVATE_LLM_HOSTS === '1' || env.ALLOW_PRIVATE_LLM_HOSTS === 'true',
     dataKey: parseKey(env.DATA_KEY),
     trustProxy: int('TRUST_PROXY', 0, 0, 5, env),
     maxDataBytes: int('MAX_DATA_MB', 50, 1, 500, env) * 1024 * 1024,

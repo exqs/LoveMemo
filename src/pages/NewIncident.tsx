@@ -73,7 +73,7 @@ export default function NewIncident() {
     if (!herNick.trim() || !myNick.trim()) { toast('请先填写双方昵称，识别要靠昵称区分说话人', 'err'); return }
     const p = await profileFor('recognize')
     if (!isPreview) {
-      if (!p) { toast('服务器上还没有可用的模型，请联系管理员配置', 'err'); return }
+      if (!p) { toast('还没有开启任何 AI 模型，管理员可以在「管理 → AI 模型」里添加', 'err'); return }
       if (!p.supports_vision) { toast(`「${p.name}」不支持图片。请在设置里给截图识别选一个视觉模型`, 'err'); return }
       if (!(await confirmDialog(`截图会经过你的服务器发送到「${p.name}」进行识别。\n确定继续吗？`, '发送并识别'))) return
     }

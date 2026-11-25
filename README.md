@@ -95,8 +95,9 @@ npm run tauri build
 - **插件**：notification、autostart
 
 ### AI 模型
-- **识别与复盘**：Claude Opus 5.5（需要 Anthropic API Key）
-- **出题与模拟**：DeepSeek V4.1-Flash（需要 DeepSeek API Key）
+- **识别与复盘**：Claude Opus 5.5
+- **出题与模拟**：DeepSeek V4.1-Flash
+- 也可以用任何 OpenAI 兼容或 Anthropic 协议的服务。管理员在「管理 → AI 模型」里填端点地址和 API Key，获取模型列表后勾选开启
 
 ---
 
@@ -263,7 +264,7 @@ npm run test:server  # 服务端安全测试
 ## 数据存储
 
 - **数据**：每个账号一份 SQLite 数据库，用 AES-256-GCM 加密后存在服务器上，服务器保留最近 3 个版本
-- **API Key**：只在服务器的环境变量里，浏览器和桌面版都拿不到
+- **API Key**：管理员在网页上填写，加密保存在服务器上，浏览器和桌面版都拿不到
 - **登录状态**：网页版是 HttpOnly Cookie，桌面版存在系统凭据管理器
 - **导出**：设置页面可导出 JSON 备份
 

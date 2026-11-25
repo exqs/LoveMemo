@@ -1,6 +1,6 @@
 // 测试工具：在随机端口启动一个独立的服务端实例（独立的临时数据目录），用原始 HTTP 请求测试
 import { request } from 'node:http'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
@@ -34,13 +34,11 @@ export interface TestServer {
   close(): Promise<void>
 }
 
-export async function startServer(env: Record<string, string> = {}, models?: unknown): Promise<TestServer> {
+export async function startServer(env: Record<string, string> = {}): Promise<TestServer> {
   const dir = mkdtempSync(join(tmpdir(), 'lovememo-test-'))
-  const modelsFile = join(dir, 'models.json')
-  if (models) writeFileSync(modelsFile, JSON.stringify(models))
   const cfg = loadConfig({
     PUBLIC_ORIGIN: ORIGIN, DATA_DIR: join(dir, 'data'), DATA_KEY: randomBytes(32).toString('base64'),
-    SCRYPT_LOG_N: '15', MODELS_FILE: modelsFile, STATIC_DIR: join(dir, 'static'), ...env,
+    SCRYPT_LOG_N: '15', STATIC_DIR: join(dir, 'static'), ...env,
   })
   const ctx = await createContext(cfg)
   const setupCode = prepareSetupCode(ctx) ?? ''
@@ -122,4 +120,13 @@ export function fakeSqlite(fill = 1, size = 4096): Buffer {
   const b = Buffer.alloc(size, fill)
   Buffer.from('SQLite format 3\0', 'latin1').copy(b, 0)
   return b
+}
+
+/** 管理员添加一个服务商并选中模型，返回 { providerId, models: [{id, model}] } */
+export async function addProvider(s: TestServer, adminCookie: string, o: { base_url: string; api_key?: string; protocol?: 'openai' | 'anthropic'; models: string[]; name?: string }) {
+  const r = await s.req('/api/admin/llm/providers', { cookie: adminCookie, json: { protocol: o.protocol ?? 'openai', name: o.name ?? 'Mock', base_url: o.base_url, api_key: o.api_key ?? '', models: o.models, password: ADMIN.password } })
+  if (r.status !== 201) throw new Error('add provider failed: ' + r.text)
+  const list = await s.req('/api/admin/llm', { cookie: adminCookie })
+  const p = list.json.providers.find((x: { id: string }) => x.id === r.json.id)
+  return { providerId: r.json.id as string, models: p.models as { id: string; model: string }[] }
 }

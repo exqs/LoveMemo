@@ -76,6 +76,38 @@ CREATE TABLE llm_usage (
   PRIMARY KEY (user_id, day)
 );
 `,
+  // v2：AI 服务商和模型由超级管理员在管理页配置。API Key 加密存放（key_enc），任何接口都不返回明文
+  `
+CREATE TABLE llm_providers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  protocol TEXT NOT NULL CHECK (protocol IN ('openai', 'anthropic')),
+  base_url TEXT NOT NULL,
+  key_enc BLOB,
+  key_hint TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE llm_models (
+  id TEXT PRIMARY KEY,
+  provider_id TEXT NOT NULL REFERENCES llm_providers(id) ON DELETE CASCADE,
+  model TEXT NOT NULL,
+  name TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  supports_vision INTEGER NOT NULL DEFAULT 0,
+  supports_json INTEGER NOT NULL DEFAULT 1,
+  max_tokens INTEGER NOT NULL,
+  timeout_s INTEGER NOT NULL DEFAULT 120,
+  temperature REAL,
+  quirks TEXT NOT NULL DEFAULT '{}',
+  price_in REAL,
+  price_out REAL,
+  routes TEXT NOT NULL DEFAULT '[]',
+  created_at INTEGER NOT NULL,
+  UNIQUE (provider_id, model)
+);
+`,
 ]
 
 export function openDb(dataDir: string): DB {

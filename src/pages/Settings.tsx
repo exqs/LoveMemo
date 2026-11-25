@@ -78,13 +78,13 @@ function Models({ s, save }: P) {
     } catch (e) { setTest((t) => ({ ...t, [p.id]: { ok: false, text: errText(e) } })) }
   }
   return (
-    <Section title="模型" hint="模型和 API Key 由管理员在服务器上统一配置，Key 只存在服务器上，浏览器和电脑里都没有。这里可以按任务选用哪个模型">
+    <Section title="模型" hint="模型和 API Key 由管理员在「管理 → AI 模型」里配置，Key 加密保存在服务器上，浏览器和电脑里都没有。这里可以按任务选用哪个模型">
       <div className="space-y-2 mb-4">
         {(profiles ?? []).map((p) => (
           <div key={p.id} className="rounded-lg border border-rule px-3 py-2.5">
             <div className="flex items-center gap-3">
               <div className="flex-1 min-w-0">
-                <p className="font-medium">{p.name} <span className="text-ink-faint font-normal text-sm">{p.model}</span></p>
+                <p className="font-medium">{p.name}{p.name !== p.model && <span className="text-ink-faint font-normal text-sm"> {p.model}</span>}</p>
                 <p className="text-xs text-ink-faint">{p.protocol === 'anthropic' ? 'Anthropic 协议' : 'OpenAI 兼容'}</p>
               </div>
               {p.supports_vision && <Chip tone="ok">支持图片</Chip>}
@@ -94,7 +94,7 @@ function Models({ s, save }: P) {
             {test[p.id]?.text && <p className={cx('text-xs mt-2', test[p.id].ok ? 'text-ok' : 'text-red')}>{test[p.id].text}</p>}
           </div>
         ))}
-        {profiles && !profiles.length && <p className="text-sm text-ink-faint">服务器上还没有可用的模型。请联系管理员在服务器的 models.json 里配置。</p>}
+        {profiles && !profiles.length && <p className="text-sm text-ink-faint">还没有开启任何 AI 模型。管理员可以在「管理 → AI 模型」里添加。</p>}
       </div>
 
       {!!profiles?.length && (

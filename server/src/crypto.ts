@@ -77,8 +77,12 @@ export async function verifyPassword(pw: string, stored: string): Promise<boolea
 
 // ---------- 用户数据加密（AES-256-GCM） ----------
 const MAGIC = Buffer.from('LMv1')
+/** 从主密钥派生不同用途的子密钥，用户数据和 API Key 用的不是同一把 */
+export function deriveKey(master: Buffer, info: string): Buffer {
+  return Buffer.from(hkdfSync('sha256', master, Buffer.alloc(0), info, 32))
+}
 export function deriveDataKey(master: Buffer): Buffer {
-  return Buffer.from(hkdfSync('sha256', master, Buffer.alloc(0), 'lovememo-user-data-v1', 32))
+  return deriveKey(master, 'lovememo-user-data-v1')
 }
 /** aad 绑定用户和版本号：文件被挪到别的用户目录下也解不开 */
 export function encrypt(key: Buffer, plain: Buffer, aad: string): Buffer {

@@ -37,7 +37,7 @@ export default function Home() {
           <p className="kai text-lg mb-1">开始之前，三件事</p>
           <ol className="text-sm text-ink-soft space-y-1.5 mb-3 list-decimal pl-5">
             <li className={s.herNick ? 'line-through text-ink-faint' : ''}>在设置里填双方在聊天截图里的昵称（识别说话人要用）</li>
-            <li className={data.profiles.length ? 'line-through text-ink-faint' : ''}>确认设置里有可用的模型（模型由管理员在服务器上配置）</li>
+            <li className={data.profiles.length ? 'line-through text-ink-faint' : ''}>确认设置里有可用的模型（管理员在「管理 → AI 模型」里开启）</li>
             <li className={data.incidents.length ? 'line-through text-ink-faint' : ''}>记下第一次</li>
           </ol>
           <div className="flex gap-2">

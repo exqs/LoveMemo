@@ -4,11 +4,12 @@ import { randomBytes } from 'node:crypto'
 import type { Config } from './config.ts'
 import type { Ctx, Req } from './context.ts'
 import { audit, housekeeping, openDb } from './db.ts'
-import { BusyError, hashPassword, humanCode, normalizeCode, sha256Hex } from './crypto.ts'
+import { BusyError, deriveKey, hashPassword, humanCode, normalizeCode, sha256Hex } from './crypto.ts'
 import { HttpError, clientIp, readBody, securityHeaders, sendJson } from './http.ts'
 import { Concurrency, RateLimiter } from './ratelimit.ts'
 import { UserData } from './userdata.ts'
-import { loadModels, listModels, proxy } from './llm.ts'
+import { listModels, proxy } from './llm.ts'
+import * as llmAdmin from './providers.ts'
 import { staticHandler } from './static.ts'
 import * as auth from './auth.ts'
 import * as admin from './admin.ts'
@@ -18,7 +19,7 @@ export async function createContext(cfg: Config): Promise<Ctx> {
   const ctx: Ctx = {
     cfg, db,
     data: new UserData(cfg.dataDir, cfg.dataKey, db),
-    models: loadModels(cfg.modelsFile),
+    providerKey: deriveKey(cfg.dataKey, 'lovememo-provider-key-v1'),
     setup: { codeHash: null },
     dummyHash: await hashPassword(randomBytes(24).toString('base64'), cfg.scryptLogN),
     limits: {
@@ -28,6 +29,7 @@ export async function createContext(cfg: Config): Promise<Ctx> {
       registerIp: new RateLimiter(10, 60 * 60_000),
       inviteFailIp: new RateLimiter(5, 60 * 60_000),
       llmUser: new RateLimiter(cfg.llmPerMinute, 60_000),
+      adminProbe: new RateLimiter(30, 10 * 60_000),
       llmConcurrent: new Concurrency(2),
     },
   }
@@ -92,6 +94,14 @@ const ROUTES: [string, RegExp, Handler][] = [
   ['POST', /^\/api\/admin\/users\/([0-9a-f-]{36})\/enable$/, (c, r, id) => admin.setDisabled(c, r, id, false)],
   ['POST', /^\/api\/admin\/users\/([0-9a-f-]{36})\/delete$/, (c, r, id) => admin.deleteUser(c, r, id)],
   ['GET', /^\/api\/admin\/audit$/, admin.listAudit],
+  ['GET', /^\/api\/admin\/llm$/, llmAdmin.adminList],
+  ['POST', /^\/api\/admin\/llm\/probe$/, llmAdmin.adminProbe],
+  ['POST', /^\/api\/admin\/llm\/providers$/, llmAdmin.adminCreate],
+  ['POST', /^\/api\/admin\/llm\/providers\/([0-9a-f-]{36})\/update$/, (c, r, id) => llmAdmin.adminUpdate(c, r, id)],
+  ['POST', /^\/api\/admin\/llm\/providers\/([0-9a-f-]{36})\/delete$/, (c, r, id) => llmAdmin.adminDelete(c, r, id)],
+  ['POST', /^\/api\/admin\/llm\/providers\/([0-9a-f-]{36})\/models$/, (c, r, id) => llmAdmin.adminAddModels(c, r, id)],
+  ['POST', /^\/api\/admin\/llm\/models\/([0-9a-f-]{36})\/update$/, (c, r, id) => llmAdmin.adminUpdateModel(c, r, id)],
+  ['POST', /^\/api\/admin\/llm\/models\/([0-9a-f-]{36})\/delete$/, (c, r, id) => llmAdmin.adminDeleteModel(c, r, id)],
 ]
 
 /**

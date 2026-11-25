@@ -139,3 +139,19 @@ export const admin = {
   deleteUser: (id: string, password: string) => json('POST', `/api/admin/users/${encodeURIComponent(id)}/delete`, { password }),
   audit: () => json<{ events: AuditEvent[] }>('GET', '/api/admin/audit'),
 }
+
+// ---------- 管理：AI 服务商和模型 ----------
+export type RouteKey = 'recognize' | 'analyze' | 'quiz' | 'roleplay'
+export interface AdminModel { id: string; model: string; name: string; enabled: boolean; supports_vision: boolean; supports_json: boolean; max_tokens: number; timeout_s: number; price_in: number | null; price_out: number | null; routes: RouteKey[] }
+export interface AdminProvider { id: string; name: string; protocol: 'openai' | 'anthropic'; base_url: string; enabled: boolean; hasKey: boolean; keyHint: string; models: AdminModel[] }
+export interface ProbeModel { id: string; name: string }
+export const llmAdmin = {
+  list: () => json<{ allowPrivate: boolean; providers: AdminProvider[] }>('GET', '/api/admin/llm'),
+  probe: (o: { protocol: string; base_url: string; api_key?: string; providerId?: string }) => json<{ models: ProbeModel[] }>('POST', '/api/admin/llm/probe', o),
+  create: (o: { name: string; protocol: string; base_url: string; api_key: string; models: { model: string; name: string }[]; password: string }) => json<{ id: string; added: number }>('POST', '/api/admin/llm/providers', o),
+  update: (id: string, o: { name?: string; enabled?: boolean; protocol?: string; base_url?: string; api_key?: string; clear_key?: boolean; password?: string }) => json('POST', `/api/admin/llm/providers/${encodeURIComponent(id)}/update`, o),
+  remove: (id: string) => json('POST', `/api/admin/llm/providers/${encodeURIComponent(id)}/delete`, {}),
+  addModels: (id: string, models: { model: string; name: string }[]) => json<{ added: number }>('POST', `/api/admin/llm/providers/${encodeURIComponent(id)}/models`, { models }),
+  updateModel: (id: string, o: Partial<Omit<AdminModel, 'id' | 'model'>>) => json('POST', `/api/admin/llm/models/${encodeURIComponent(id)}/update`, o),
+  removeModel: (id: string) => json('POST', `/api/admin/llm/models/${encodeURIComponent(id)}/delete`, {}),
+}

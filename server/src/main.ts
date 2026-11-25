@@ -1,6 +1,7 @@
 // 服务端入口：node server/src/main.ts
 import { loadConfig } from './config.ts'
 import { createContext, createHttpServer, prepareSetupCode } from './app.ts'
+import { usableModels } from './providers.ts'
 
 // 新建的文件只有本用户可读写（数据库、加密数据文件）
 process.umask(0o077)
@@ -30,7 +31,7 @@ if (code) {
 
 const server = createHttpServer(ctx)
 server.listen(cfg.port, cfg.host, () => {
-  console.log(`[server] LoveMemo 已启动：监听 ${cfg.host}:${cfg.port}，对外地址 ${cfg.publicOrigin}，可用模型 ${ctx.models.list.filter((m) => m.available).length} 个`)
+  console.log(`[server] LoveMemo 已启动：监听 ${cfg.host}:${cfg.port}，对外地址 ${cfg.publicOrigin}，已开启模型 ${usableModels(ctx).length} 个${cfg.allowPrivateLlm ? '（允许内网模型地址）' : ''}`)
 })
 
 function shutdown() {

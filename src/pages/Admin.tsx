@@ -5,6 +5,7 @@ import { Page } from '../components/Page'
 import { Button, Chip, Field, Modal, Sheet, confirmDialog, cx, errText, inputCls, toast } from '../components/ui'
 import { admin, type AdminUser, type AuditEvent, type Invite } from '../lib/api'
 import { fmtDate } from '../lib/util'
+import AdminModels from './AdminModels'
 
 const fmtTime = (t: number | null) => (t ? new Date(t).toLocaleString('zh-CN', { hour12: false }) : '—')
 const fmtSize = (n: number) => (n < 1024 * 1024 ? `${Math.ceil(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
@@ -21,6 +22,7 @@ export default function AdminPage() {
   return (
     <Page narrow title="管理">
       <div className="space-y-5">
+        <AdminModels />
         <Invites />
         <Users />
         <Audit />
@@ -150,8 +152,10 @@ const EVENTS: Record<string, string> = {
   login_disabled: '停用账号尝试登录', logout: '退出登录', logout_all: '退出所有设备', register_ok: '注册成功', register_bad_invite: '注册码错误',
   password_changed: '修改密码', password_change_fail: '修改密码时原密码错误', invite_created: '生成注册码', invite_revoked: '撤销注册码',
   user_disabled: '停用用户', user_enabled: '恢复用户', user_deleted: '删除用户', admin_reauth_fail: '管理员确认密码错误', admin_password_reset_cli: '在服务器上重设管理员密码',
+  llm_probe: '获取模型列表', llm_provider_created: '添加 AI 服务商', llm_provider_updated: '修改 AI 服务商', llm_provider_deleted: '删除 AI 服务商',
+  llm_models_added: '添加模型', llm_model_updated: '修改模型', llm_model_deleted: '删除模型', llm_reauth_fail: '配置模型时密码错误',
 }
-const DANGER = new Set(['setup_fail', 'login_fail', 'login_locked', 'register_bad_invite', 'password_change_fail', 'admin_reauth_fail', 'login_disabled'])
+const DANGER = new Set(['setup_fail', 'login_fail', 'login_locked', 'register_bad_invite', 'password_change_fail', 'admin_reauth_fail', 'login_disabled', 'llm_reauth_fail'])
 
 function Audit() {
   const load = useCallback(() => admin.audit().then((r) => r.events), [])

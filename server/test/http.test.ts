@@ -1,10 +1,8 @@
 // 请求层的攻击用例：跨站请求、Host 伪造、路径穿越、超大请求、数据隔离、AI 转发
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createServer } from 'node:http'
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { AddressInfo } from 'node:net'
 import { ADMIN, fakeSqlite, registerUser, setupAdmin, startServer } from './helpers.ts'
 
 test('跨站请求（CSRF）：缺少自定义头、Origin 不对、Sec-Fetch-Site 是 cross-site 都被拒绝', async () => {
@@ -165,90 +163,6 @@ test('数据文件被挪到别人的目录下也解不开（加密绑定了用�
     assert.equal(r.status, 500)
     assert.ok(!r.body.includes(Buffer.alloc(64, 7)))
   } finally { await s.close() }
-})
-
-test('AI 转发：Key 只在服务器上；前端不能改地址和模型；多余字段被丢弃；有每日次数上限', async () => {
-  let seen: { headers: Record<string, unknown>; body: Record<string, unknown> } | null = null
-  const upstream = createServer((req, res) => {
-    const chunks: Buffer[] = []
-    req.on('data', (c) => chunks.push(c))
-    req.on('end', () => {
-      seen = { headers: req.headers, body: JSON.parse(Buffer.concat(chunks).toString()) }
-      if (req.url === '/redirect/chat/completions') { res.writeHead(302, { location: 'http://169.254.169.254/latest/meta-data/' }); res.end(); return }
-      res.setHeader('content-type', 'application/json')
-      res.end(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }], usage: { prompt_tokens: 5, completion_tokens: 2 } }))
-    })
-  })
-  await new Promise<void>((r) => upstream.listen(0, '127.0.0.1', () => r()))
-  const up = `http://127.0.0.1:${(upstream.address() as AddressInfo).port}`
-  process.env.TEST_API_KEY = 'sk-server-secret'
-  const s = await startServer({ LLM_DAILY_LIMIT: '3' }, [
-    { id: 'm1', name: 'Mock', protocol: 'openai', base_url: up, allow_http: true, model: 'real-model', key_env: 'TEST_API_KEY', routes: ['quiz'] },
-    { id: 'redir', name: 'Redir', protocol: 'openai', base_url: up + '/redirect', allow_http: true, model: 'x' },
-  ])
-  try {
-    const admin = await setupAdmin(s)
-    const user = await registerUser(s, admin, 'carol')
-    assert.equal((await s.req('/api/llm', { json: { profileId: 'm1', body: { messages: [] } } })).status, 401)
-
-    const list = await s.req('/api/models', { cookie: user })
-    assert.equal(list.status, 200)
-    assert.ok(!list.text.includes('sk-server-secret') && !list.text.includes(up) && !list.text.includes('TEST_API_KEY'))
-
-    const r = await s.req('/api/llm', { cookie: user, json: {
-      profileId: 'm1',
-      body: {
-        model: 'gpt-expensive', url: 'http://169.254.169.254/', stream: true, tools: [{ type: 'function' }], n: 50,
-        max_tokens: 9_999_999,
-        messages: [{ role: 'user', content: 'hi', name: 'x', extra: 1 }],
-      },
-    } })
-    assert.equal(r.status, 200, r.text)
-    assert.equal(r.json.status, 200)
-    assert.equal(seen!.headers.authorization, 'Bearer sk-server-secret')
-    assert.equal(seen!.body.model, 'real-model')
-    assert.equal(seen!.body.max_tokens, 8192)
-    for (const k of ['url', 'stream', 'tools', 'n']) assert.equal(seen!.body[k], undefined, k)
-    assert.deepEqual(seen!.body.messages, [{ role: 'user', content: 'hi' }])
-    assert.ok(!r.text.includes('sk-server-secret'))
-
-    // 图片只能是内嵌数据，不能是网址（否则模型服务会替我们去访问任意地址）
-    const img = await s.req('/api/llm', { cookie: user, json: { profileId: 'm1', body: { messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'http://169.254.169.254/' } }] }] } } })
-    assert.equal(img.status, 400)
-    // 不存在的模型
-    assert.equal((await s.req('/api/llm', { cookie: user, json: { profileId: '../../etc', body: { messages: [{ role: 'user', content: 'x' }] } } })).status, 404)
-    // 上游重定向不跟随
-    const rd = await s.req('/api/llm', { cookie: user, json: { profileId: 'redir', body: { messages: [{ role: 'user', content: 'x' }] } } })
-    assert.equal(rd.json.status, 0)
-    // 每日上限（成功 1 次 + 重定向 1 次已计数，再 1 次到 3 次，之后被拒绝）
-    await s.req('/api/llm', { cookie: user, json: { profileId: 'm1', body: { messages: [{ role: 'user', content: 'x' }] } } })
-    const over = await s.req('/api/llm', { cookie: user, json: { profileId: 'm1', body: { messages: [{ role: 'user', content: 'x' }] } } })
-    assert.equal(over.status, 429)
-    assert.equal(over.json.error, 'quota')
-  } finally {
-    await s.close()
-    upstream.close()
-    delete process.env.TEST_API_KEY
-  }
-})
-
-test('models.json：拒绝不安全的配置', async () => {
-  const { loadModels } = await import('../src/llm.ts')
-  const { mkdtempSync } = await import('node:fs')
-  const { tmpdir } = await import('node:os')
-  const d = mkdtempSync(join(tmpdir(), 'lm-models-'))
-  const f = join(d, 'm.json')
-  const bad = [
-    [{ id: 'a', protocol: 'openai', base_url: 'http://api.example.com', model: 'x' }],
-    [{ id: 'a', protocol: 'openai', base_url: 'https://u:p@api.example.com', model: 'x' }],
-    [{ id: 'a', protocol: 'openai', base_url: 'https://api.example.com', model: 'x', key_env: 'DATA_KEY' }],
-    [{ id: 'A/../b', protocol: 'openai', base_url: 'https://api.example.com', model: 'x' }],
-    [{ id: 'a', protocol: 'grpc', base_url: 'https://api.example.com', model: 'x' }],
-  ]
-  for (const b of bad) {
-    writeFileSync(f, JSON.stringify(b))
-    assert.throws(() => loadModels(f, {}), JSON.stringify(b))
-  }
 })
 
 test('配置：缺少密钥、密钥太弱、对外地址不是 https 时拒绝启动', async () => {

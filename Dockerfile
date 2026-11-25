@@ -15,7 +15,7 @@ FROM node:22-bookworm-slim
 ENV NODE_ENV=production \
     NODE_OPTIONS="--disable-warning=ExperimentalWarning" \
     HOST=0.0.0.0 PORT=8787 \
-    DATA_DIR=/data STATIC_DIR=/app/dist MODELS_FILE=/config/models.json
+    DATA_DIR=/data STATIC_DIR=/app/dist
 WORKDIR /app
 # 服务端只用 Node 内置模块，不需要 npm install
 COPY server/package.json ./server/package.json

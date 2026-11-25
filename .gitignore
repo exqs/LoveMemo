@@ -50,5 +50,3 @@ deploy/.env
 CLAUDE.md
 # 打包文件
 *.tar.gz
-# 服务器上实际使用的模型配置（模板是 models.example.json）
-deploy/models.json

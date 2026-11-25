@@ -113,7 +113,7 @@ export async function callText(o: CallOpts): Promise<string> {
     return typeof m === 'string' ? m : JSON.stringify(m)
   }
   let p = await profileFor(o.task, o.profileId)
-  if (!p) throw new AiError('服务器上还没有可用的模型，请联系管理员配置。')
+  if (!p) throw new AiError('还没有开启任何 AI 模型。管理员可以在「管理 → AI 模型」里添加。')
   const hasImage = o.messages.some((m) => typeof m.content !== 'string' && m.content.some((c) => c.type === 'image'))
   if (hasImage && !p.supports_vision) throw new AiError(`「${p.name}」不支持图片。截图识别需要视觉模型，请在设置里换一个。`)
   for (let attempt = 0; attempt < 4; attempt++) {
