@@ -1,6 +1,6 @@
 # Dependencies
 node_modules/
-pnpm-lock.yaml
+# pnpm-lock.yaml 要提交：锁定依赖版本，服务器构建时用 --frozen-lockfile 防止被换成别的版本
 package-lock.json
 yarn.lock
 
@@ -40,3 +40,15 @@ src-tauri/WixTools/
 # Temporary files
 *.tmp
 .cache/
+
+# 服务端本机开发数据
+.dev-data/
+# 部署用的密钥文件
+deploy/.env
+
+# 本机给 AI 看的项目说明，里面有私人信息，不公开
+CLAUDE.md
+# 打包文件
+*.tar.gz
+# 服务器上实际使用的模型配置（模板是 models.example.json）
+deploy/models.json

@@ -2,6 +2,7 @@
 import type { Commitment, ModelProfile } from '../lib/types'
 import { DAY, fmtDate, parseJSON, uid } from '../lib/util'
 import { writeBackup } from '../lib/platform'
+import { isPreview, models as apiModels } from '../lib/api'
 import { emitChange, getSettings, insert, q, run, saveSettings, update } from './base'
 
 type Row = Record<string, unknown>
@@ -30,18 +31,36 @@ export async function updateCommitment(id: string, patch: Partial<Commitment>) {
 export async function deleteCommitment(id: string) { await run('DELETE FROM commitment WHERE id=?', [id]); emitChange() }
 
 // ---------- 模型配置 ----------
+// 正式使用时模型由管理员在服务器上配置，这里只拿到名称和能力，拿不到地址和 Key。
+// 单文件界面预览没有服务器，读本地表里的示例数据。
 const toProfile = (r: Row): ModelProfile => ({
   ...(r as unknown as ModelProfile), supports_vision: !!r.supports_vision, supports_json: !!r.supports_json,
   needs_key: !!r.needs_key, quirks: parseJSON(r.quirks as string, {}),
 })
+let serverModels: Promise<ModelProfile[]> | null = null
+function fromServer(): Promise<ModelProfile[]> {
+  serverModels ??= apiModels().then((r) => r.models.map((m) => ({
+    ...m, base_url: '', needs_key: false, created_at: 0,
+  }))).catch((e) => { serverModels = null; throw e })
+  return serverModels
+}
 export async function listProfiles(): Promise<ModelProfile[]> {
+  if (!isPreview) return fromServer()
   return (await q('SELECT * FROM model_profile ORDER BY created_at')).map(toProfile)
 }
 export async function getProfile(id: string): Promise<ModelProfile | null> {
+  if (!isPreview) return (await fromServer()).find((p) => p.id === id) ?? null
   const r = await q('SELECT * FROM model_profile WHERE id=?', [id])
   return r.length ? toProfile(r[0]) : null
 }
 export async function saveProfile(p: ModelProfile) {
+  if (!isPreview) {
+    // 自动适配的参数（quirks）只在本次打开期间记住
+    const all = await fromServer()
+    const i = all.findIndex((x) => x.id === p.id)
+    if (i >= 0) all[i] = p
+    return
+  }
   const exists = await getProfile(p.id)
   const { id, ...rest } = p
   if (exists) await update('model_profile', id, rest)

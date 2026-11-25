@@ -1,34 +1,28 @@
-// API Key 存在系统凭据里（Windows 凭据管理器 / macOS 钥匙串），不进数据库，不回传给前端
+// 登录令牌存在系统凭据里（Windows 凭据管理器 / macOS 钥匙串），不写文件，不交给前端脚本。
+// AI 的 API Key 已经改为只存在服务器上，桌面版不再保存任何 Key。
 use keyring::Entry;
 
-const SERVICE: &str = "fupan-bianqian";
+const SERVICE: &str = "lovememo";
 
-fn entry(profile_id: &str) -> Result<Entry, String> {
-    Entry::new(SERVICE, &format!("model:{profile_id}")).map_err(|e| format!("无法访问系统凭据：{e}"))
+fn entry(name: &str) -> Result<Entry, String> {
+    Entry::new(SERVICE, name).map_err(|e| format!("无法访问系统凭据：{e}"))
 }
 
-pub fn get(profile_id: &str) -> Result<Option<String>, String> {
-    match entry(profile_id)?.get_password() {
-        Ok(k) => Ok(Some(k)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("读取 API Key 失败：{e}")),
+pub fn get(name: &str) -> Result<Option<String>, String> {
+    match entry(name)?.get_password() {
+        Ok(k) if !k.is_empty() => Ok(Some(k)),
+        Ok(_) | Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("读取登录状态失败：{e}")),
     }
 }
 
-#[tauri::command]
-pub fn secret_set(profile_id: String, key: String) -> Result<(), String> {
-    entry(&profile_id)?.set_password(key.trim()).map_err(|e| format!("保存 API Key 失败：{e}"))
+pub fn set(name: &str, value: &str) -> Result<(), String> {
+    entry(name)?.set_password(value).map_err(|e| format!("保存登录状态失败：{e}"))
 }
 
-#[tauri::command]
-pub fn secret_has(profile_id: String) -> Result<bool, String> {
-    Ok(get(&profile_id)?.is_some())
-}
-
-#[tauri::command]
-pub fn secret_delete(profile_id: String) -> Result<(), String> {
-    match entry(&profile_id)?.delete_credential() {
+pub fn delete(name: &str) -> Result<(), String> {
+    match entry(name)?.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("删除 API Key 失败：{e}")),
+        Err(e) => Err(format!("清除登录状态失败：{e}")),
     }
 }

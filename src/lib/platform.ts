@@ -1,22 +1,10 @@
-// 运行环境：Tauri 桌面（正式）或浏览器（开发预览，数据存 IndexedDB，AI 用模拟数据）
+// 运行环境：Tauri 桌面版或网页版。两者都要登录服务器，数据和 AI 都走服务器（见 api.ts）；
+// 这里只放桌面版独有的能力：系统通知、开机自启、保存到下载文件夹、本机备份。
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const { invoke } = await import('@tauri-apps/api/core')
   return invoke<T>(cmd, args)
-}
-
-export async function setSecret(profileId: string, key: string) {
-  if (!isTauri) { sessionStorage.setItem('k:' + profileId, key); return }
-  await invoke('secret_set', { profileId, key })
-}
-export async function hasSecret(profileId: string): Promise<boolean> {
-  if (!isTauri) return !!sessionStorage.getItem('k:' + profileId)
-  return invoke<boolean>('secret_has', { profileId })
-}
-export async function deleteSecret(profileId: string) {
-  if (!isTauri) { sessionStorage.removeItem('k:' + profileId); return }
-  await invoke('secret_delete', { profileId })
 }
 
 export interface NotifyEntry { key: string; at: number; title: string; body: string; route: string }

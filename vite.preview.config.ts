@@ -6,6 +6,7 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  define: { __PREVIEW_BUILD__: 'true' },
   // 预览面板的安全策略不允许 WebAssembly，改用 sql.js 的纯 JavaScript 版本（接口相同）
   resolve: { alias: [{ find: /^sql\.js$/, replacement: 'sql.js/dist/sql-asm.js' }] },
   build: {

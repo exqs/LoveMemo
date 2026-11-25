@@ -10,7 +10,7 @@ import { addTag, listTags } from '../db/rules'
 import { createCommitment } from '../db/misc'
 import { analyzeIncident } from '../ai/tasks'
 import { profileFor } from '../ai/client'
-import { isTauri } from '../lib/platform'
+import { isPreview } from '../lib/api'
 import type { AnalysisData, Incident, Message } from '../lib/types'
 import { fmtDateTime, fromLocalInput, toLocalInput } from '../lib/util'
 import MatchModal from './MatchModal'
@@ -57,7 +57,7 @@ export default function AnalysisPage() {
       const p = await profileFor('analyze')
       const out = await analyzeIncident(inc, msgs)
       setA(out); setDirty(true)
-      setProfileName(isTauri ? p?.name ?? '' : '预览模拟')
+      setProfileName(!isPreview ? p?.name ?? '' : '预览模拟')
       if (out.dropped_quotes?.length) toast(`有 ${out.dropped_quotes.length} 条"原话"在聊天里找不到，已丢弃`, 'info')
     } catch (e) { toast(errText(e), 'err') } finally { setBusy(false) }
   }

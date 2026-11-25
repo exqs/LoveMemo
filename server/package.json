@@ -1,0 +1,12 @@
+{
+  "name": "lovememo-server",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "LoveMemo 服务端：账号、注册码、加密数据存储、AI 转发。只用 Node 内置模块，没有第三方运行时依赖。",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 \"test/*.test.ts\""
+  }
+}

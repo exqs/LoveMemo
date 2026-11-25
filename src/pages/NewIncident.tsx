@@ -8,7 +8,7 @@ import { addAttachment, createIncident, deleteIncident, replaceMessages } from '
 import { profileFor } from '../ai/client'
 import { recognizeImages } from '../ai/tasks'
 import { rawToMessages } from '../lib/sample'
-import { isTauri } from '../lib/platform'
+import { isPreview } from '../lib/api'
 
 const SOURCES = ['电脑版微信', '手机版微信', 'QQ', '其他']
 
@@ -26,7 +26,6 @@ export async function fileToDataUrl(file: File, maxSide = 2000): Promise<string>
   return c.toDataURL('image/jpeg', 0.88)
 }
 
-const isLocal = (url: string) => /^https?:\/\/(localhost|127\.|0\.0\.0\.0|192\.168\.|10\.|\[::1\])/i.test(url)
 
 export default function NewIncident() {
   const nav = useNavigate()
@@ -73,10 +72,10 @@ export default function NewIncident() {
   const recognize = async () => {
     if (!herNick.trim() || !myNick.trim()) { toast('请先填写双方昵称，识别要靠昵称区分说话人', 'err'); return }
     const p = await profileFor('recognize')
-    if (isTauri) {
-      if (!p) { toast('还没有配置模型，请先到设置里添加', 'err'); return }
+    if (!isPreview) {
+      if (!p) { toast('服务器上还没有可用的模型，请联系管理员配置', 'err'); return }
       if (!p.supports_vision) { toast(`「${p.name}」不支持图片。请在设置里给截图识别选一个视觉模型`, 'err'); return }
-      if (!isLocal(p.base_url) && !(await confirmDialog(`截图将发送到「${p.name}」（${new URL(p.base_url).host}）进行识别。\n确定继续吗？`, '发送并识别'))) return
+      if (!(await confirmDialog(`截图会经过你的服务器发送到「${p.name}」进行识别。\n确定继续吗？`, '发送并识别'))) return
     }
     await saveSettings({ herNick: herNick.trim(), myNick: myNick.trim() })
     let id = ''

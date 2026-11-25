@@ -229,14 +229,23 @@ npm run tauri build
 
 ---
 
-## 配置 API Key
+## 部署到服务器（登录与注册）
 
-首次运行后，进入"设置"页面，填入：
+LoveMemo 现在需要一个服务端：网页版和桌面版都要登录，数据加密保存在服务器上，AI 的 API Key 只放在服务器上。
 
-- **Claude API Key**：从 https://console.anthropic.com/ 获取
-- **DeepSeek API Key**：从 https://platform.deepseek.com/ 获取
+- 第一次打开时创建超级管理员（需要服务器日志里的一次性安装码）
+- 其他人注册需要超级管理员生成的注册码
+- 用 Docker Compose + Caddy 部署，自动 HTTPS
 
-API Key 会安全存储在系统密钥链中（Windows 凭据管理器 / macOS Keychain / Linux Secret Service）。
+详细步骤和安全设计见 [deploy/DEPLOY.md](deploy/DEPLOY.md)。
+
+本机开发：
+
+```bash
+npm run server:dev   # 启动服务端（数据放在 .dev-data/）
+npm run dev          # 另开一个终端，打开 http://localhost:1420
+npm run test:server  # 服务端安全测试
+```
 
 ---
 
@@ -253,12 +262,10 @@ API Key 会安全存储在系统密钥链中（Windows 凭据管理器 / macOS K
 
 ## 数据存储
 
-- **桌面版数据库**：存储在用户数据目录（IndexedDB 持久化）
-  - Windows: `%APPDATA%\com.lovememo.app\`
-  - macOS: `~/Library/Application Support/com.lovememo.app/`
-  - Linux: `~/.local/share/com.lovememo.app/`
-- **API Key**：存储在系统密钥链，不会明文保存
-- **导出**：设置页面可导出 `.sqlite` 文件
+- **数据**：每个账号一份 SQLite 数据库，用 AES-256-GCM 加密后存在服务器上，服务器保留最近 3 个版本
+- **API Key**：只在服务器的环境变量里，浏览器和桌面版都拿不到
+- **登录状态**：网页版是 HttpOnly Cookie，桌面版存在系统凭据管理器
+- **导出**：设置页面可导出 JSON 备份
 
 ---
 

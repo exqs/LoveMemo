@@ -1,4 +1,5 @@
-mod llm;
+mod api;
+mod api_core;
 mod scheduler;
 mod secrets;
 
@@ -58,14 +59,14 @@ pub fn run() {
     tauri::Builder::default()
         // 单实例要最先注册：再次打开时只把已有窗口调出来
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
-        .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .invoke_handler(tauri::generate_handler![
-            llm::llm_request,
-            secrets::secret_set,
-            secrets::secret_has,
-            secrets::secret_delete,
+            api::server_get_url,
+            api::server_set_url,
+            api::api_call,
+            api::api_login,
+            api::api_logout,
             scheduler::schedule_set,
             scheduler::schedule_fired,
             scheduler::notify_now,
@@ -74,6 +75,7 @@ pub fn run() {
         ])
         .setup(|app| {
             let handle = app.handle().clone();
+            app.manage(api::init(&handle));
             scheduler::init(&handle);
 
             // 开机自启时带 --hidden，只留在托盘

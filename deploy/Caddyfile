@@ -1,0 +1,31 @@
+# Caddy 自动申请和续期 HTTPS 证书（Let's Encrypt），80 端口自动跳转到 443
+{
+	servers {
+		# 请求头不超过 16KB，和服务端保持一致
+		max_header_size 16KB
+	}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# 整体请求体上限，具体接口在服务端另有更小的限制
+	request_body {
+		max_size 60MB
+	}
+
+	reverse_proxy app:8787 {
+		# 只把真实客户端 IP 交给服务端（服务端 TRUST_PROXY=1 只取最右边一项）
+		header_up X-Forwarded-For {remote_host}
+		header_up -X-Real-IP
+	}
+
+	header {
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

@@ -1,12 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "主窗口权限。网络请求和 API Key 都在 Rust 端处理，前端不开放 http 和文件系统插件。",
+  "description": "主窗口权限。和服务器的通信、登录令牌都在 Rust 端处理，前端不开放 http、sql 和文件系统插件。",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "sql:default",
-    "sql:allow-execute",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled"

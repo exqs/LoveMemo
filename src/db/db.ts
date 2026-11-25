@@ -1,6 +1,6 @@
-// 数据库抽象：桌面端用 tauri-plugin-sql（SQLite 文件），浏览器预览用 sql.js（内存 + IndexedDB 持久化）
-// 两边都使用 ? 占位符。tauri-plugin-sql 的多次 execute 可能落在不同连接上，所以不使用显式事务。
-import { isTauri } from '../lib/platform'
+// 数据库：浏览器内 sql.js（SQLite）。登录后从服务器取回自己的数据库文件，改动后整份加密保存回服务器。
+// 单文件界面预览（__FUPAN_PREVIEW__）只用内存数据库，不连服务器。
+import { ApiError, dataGet, dataPut, isPreview } from '../lib/api'
 import { MIGRATIONS } from './schema'
 
 export type Bind = (string | number | null)[]
@@ -11,45 +11,84 @@ export interface Db {
 
 let dbPromise: Promise<Db> | null = null
 export function getDb(): Promise<Db> {
-  if (!dbPromise) dbPromise = open().then(async (db) => { await migrate(db); return db })
+  if (!dbPromise) dbPromise = openSqlJs().then(async (db) => { await migrate(db); return db })
   return dbPromise
 }
 
-async function open(): Promise<Db> {
-  if (isTauri) {
-    const { default: Database } = await import('@tauri-apps/plugin-sql')
-    const d = await Database.load('sqlite:fupan.db')
-    await d.execute('PRAGMA foreign_keys = ON')
-    await d.execute('PRAGMA journal_mode = WAL')
-    return {
-      select: (sql, bind = []) => d.select(sql, bind),
-      execute: async (sql, bind = []) => (await d.execute(sql, bind)).rowsAffected,
+// ---------- 保存状态（界面上显示"保存中/保存失败/有冲突"） ----------
+export type SaveState = 'saved' | 'pending' | 'saving' | 'error' | 'conflict' | 'expired'
+let saveState: SaveState = 'saved'
+const saveSubs = new Set<(s: SaveState) => void>()
+function setSaveState(s: SaveState) { saveState = s; saveSubs.forEach((f) => f(s)) }
+export function getSaveState() { return saveState }
+export function onSaveState(f: (s: SaveState) => void) { saveSubs.add(f); return () => { saveSubs.delete(f) } }
+
+interface Remote { owner: string; version: number; dirty: boolean; running: Promise<void> | null; timer?: ReturnType<typeof setTimeout>; exportFn: () => Uint8Array; conflictVersion?: number }
+let remote: Remote | null = null
+
+async function saveLoop() {
+  const r = remote
+  if (!r) return
+  while (r.dirty) {
+    r.dirty = false
+    setSaveState('saving')
+    try {
+      r.version = await dataPut(r.exportFn(), r.version, r.owner)
+    } catch (e) {
+      r.dirty = true
+      if (e instanceof ApiError && e.code === 'conflict') {
+        r.conflictVersion = Number(e.extra.version ?? NaN)
+        setSaveState('conflict')
+      } else if (e instanceof ApiError && e.code === 'wrong_owner') {
+        // 换了账号：这份数据不属于当前登录的人，停止保存
+        setSaveState('conflict')
+        r.conflictVersion = undefined
+      } else if (e instanceof ApiError && e.status === 401) setSaveState('expired')
+      else setSaveState('error')
+      return
     }
   }
-  return openSqlJs()
+  setSaveState('saved')
 }
 
-// ---------- 浏览器预览后端 ----------
-const IDB_NAME = 'fupan-preview'
-function idb(): Promise<IDBDatabase> {
-  return new Promise((res, rej) => {
-    const r = indexedDB.open(IDB_NAME, 1)
-    r.onupgradeneeded = () => r.result.createObjectStore('kv')
-    r.onsuccess = () => res(r.result)
-    r.onerror = () => rej(r.error)
-  })
+function schedule() {
+  const r = remote
+  if (!r) return
+  r.dirty = true
+  if (saveState === 'conflict' || saveState === 'expired') return // 等用户处理
+  if (saveState === 'saved') setSaveState('pending')
+  clearTimeout(r.timer)
+  r.timer = setTimeout(() => { void flushSave() }, 800)
 }
-async function idbGet(): Promise<Uint8Array | undefined> {
-  const d = await idb()
-  return new Promise((res) => {
-    const q = d.transaction('kv').objectStore('kv').get('db')
-    q.onsuccess = () => res(q.result as Uint8Array | undefined)
-    q.onerror = () => res(undefined)
-  })
+
+/** 立即保存（排队：同一时间只有一个保存请求） */
+export async function flushSave(): Promise<void> {
+  const r = remote
+  if (!r) return
+  clearTimeout(r.timer)
+  if (r.running) { await r.running; if (!r.dirty) return }
+  r.running = saveLoop().finally(() => { r.running = null })
+  await r.running
 }
-async function idbPut(v: Uint8Array) {
-  const d = await idb()
-  d.transaction('kv', 'readwrite').objectStore('kv').put(v, 'db')
+/** 重新登录后，或网络恢复后，重试保存 */
+export function retrySave() {
+  if (remote?.dirty) { setSaveState('pending'); void flushSave() }
+}
+/** 发生冲突时，用这台设备上的数据覆盖服务器上的 */
+export async function overwriteServer() {
+  const r = remote
+  if (!r || !Number.isInteger(r.conflictVersion)) return
+  r.version = r.conflictVersion!
+  r.conflictVersion = undefined
+  r.dirty = true
+  setSaveState('pending')
+  await flushSave()
+}
+export function hasUnsaved() { return !!remote && (remote.dirty || !!remote.running) }
+/** 退出或换人登录前调用：之后不再往服务器保存任何东西，防止把上一个人的数据存进下一个人的账号 */
+export function discardRemote() {
+  if (remote) clearTimeout(remote.timer)
+  remote = null
 }
 
 async function openSqlJs(): Promise<Db> {
@@ -58,38 +97,36 @@ async function openSqlJs(): Promise<Db> {
     import('sql.js/dist/sql-wasm.wasm?url'),
   ])
   const SQL = await initSqlJs({ locateFile: () => wasmUrl, useOldExtensionFunctions: true })
-  // 界面预览（单文件 HTML）只用内存数据库，不读写 IndexedDB
-  const memOnly = !!(window as unknown as { __FUPAN_PREVIEW__?: string }).__FUPAN_PREVIEW__
-  const saved = memOnly ? undefined : await idbGet().catch(() => undefined)
-  const db = saved ? new SQL.Database(saved) : new SQL.Database()
-  db.run('PRAGMA foreign_keys = ON')
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const persist = () => {
-    if (memOnly) return
-    clearTimeout(timer)
-    timer = setTimeout(() => { idbPut(db.export()).catch(console.error) }, 400)
+  let db: InstanceType<typeof SQL.Database>
+  if (isPreview) {
+    db = new SQL.Database()
+  } else {
+    const { version, owner, bytes } = await dataGet()
+    db = bytes ? new SQL.Database(bytes) : new SQL.Database()
+    remote = {
+      owner, version, dirty: false, running: null,
+      // export() 会重开数据库、把 PRAGMA 恢复默认，所以导出后要重新打开外键约束
+      exportFn: () => { const out = db.export(); db.run('PRAGMA foreign_keys = ON'); return out },
+    }
   }
+  db.run('PRAGMA foreign_keys = ON')
   return {
     async select<T>(sql: string, bind: Bind = []) {
       const st = db.prepare(sql)
-      st.bind(bind)
-      const out: T[] = []
-      while (st.step()) out.push(st.getAsObject() as T)
-      st.free()
-      return out
+      try {
+        st.bind(bind)
+        const out: T[] = []
+        while (st.step()) out.push(st.getAsObject() as T)
+        return out
+      } finally { st.free() }
     },
     async execute(sql, bind = []) {
       db.run(sql, bind)
-      persist()
-      return db.getRowsModified()
+      const n = db.getRowsModified()
+      schedule()
+      return n
     },
   }
-}
-
-/** 清空浏览器预览数据（仅开发用） */
-export async function resetPreviewDb() {
-  const d = await idb()
-  d.transaction('kv', 'readwrite').objectStore('kv').delete('db')
 }
 
 async function migrate(db: Db) {

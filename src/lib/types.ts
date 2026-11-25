@@ -119,6 +119,8 @@ export interface ModelProfile {
   price_in: number | null // 每百万输入 token 的价格（元）
   price_out: number | null
   created_at: number
+  /** 服务器配置里标注的推荐用途 */
+  routes?: RouteKey[]
 }
 
 export type AiTask = 'recognize' | 'analyze' | 'match' | 'quiz' | 'grade' | 'roleplay' | 'weekly' | 'test'

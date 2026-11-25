@@ -8,7 +8,6 @@ import { listCommitments, listProfiles, updateCommitment } from '../db/misc'
 import { listCards, listRules, todayQueue } from '../db/rules'
 import { masteryLevel } from '../domain/srs'
 import { rankRules } from '../domain/stats'
-import { importSample } from '../lib/sample'
 import { DAY, fmtDate, relDays } from '../lib/util'
 
 export default function Home() {
@@ -38,12 +37,12 @@ export default function Home() {
           <p className="kai text-lg mb-1">开始之前，三件事</p>
           <ol className="text-sm text-ink-soft space-y-1.5 mb-3 list-decimal pl-5">
             <li className={s.herNick ? 'line-through text-ink-faint' : ''}>在设置里填双方在聊天截图里的昵称（识别说话人要用）</li>
-            <li className={data.profiles.length ? 'line-through text-ink-faint' : ''}>在设置里添加一个模型（截图识别需要支持图片的模型）</li>
-            <li className={data.incidents.length ? 'line-through text-ink-faint' : ''}>记下第一次。也可以直接导入 11 月 22 日那次的聊天（已经按截图转写好）</li>
+            <li className={data.profiles.length ? 'line-through text-ink-faint' : ''}>确认设置里有可用的模型（模型由管理员在服务器上配置）</li>
+            <li className={data.incidents.length ? 'line-through text-ink-faint' : ''}>记下第一次</li>
           </ol>
           <div className="flex gap-2">
             <Button onClick={() => nav('/settings')}>去设置</Button>
-            {!data.incidents.length && <Button onClick={async () => { const id = await importSample(); toast('已导入 11-22 那次'); nav(`/incident/${id}/edit`) }}>导入 11-22 那次</Button>}
+            {__PREVIEW_BUILD__ && !data.incidents.length && <Button onClick={async () => { const { importSample } = await import('../fixtures/importSample'); const id = await importSample(); toast('已导入 11-22 那次'); nav(`/incident/${id}/edit`) }}>导入 11-22 那次</Button>}
             <Button kind="ghost" onClick={() => save({ onboarded: true })}>不再显示</Button>
           </div>
         </Sheet>

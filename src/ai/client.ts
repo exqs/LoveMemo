@@ -1,12 +1,11 @@
 // 大模型调用：OpenAI 兼容协议 + Anthropic 原生协议。
-// 桌面端请求由 Rust 端发出（读取系统凭据里的 Key，绕开跨域）；浏览器预览走模拟数据。
+// 请求发到自己的服务器，由服务器补上管理员配置的 Key 再转发给模型服务；界面预览走模拟数据。
 import type { z } from 'zod'
 import type { AiTask, ModelProfile, RouteKey } from '../lib/types'
-import { invoke, isTauri } from '../lib/platform'
+import { ApiError, isPreview, llm } from '../lib/api'
 import { extractJSON } from '../domain/text'
 import { getSettings } from '../db/base'
 import { getProfile, listProfiles, logCall, saveProfile } from '../db/misc'
-import { mockReply } from './mock'
 
 export type Part = { type: 'text'; text: string } | { type: 'image'; dataUrl: string }
 export interface ChatMsg { role: 'user' | 'assistant'; content: string | Part[] }
@@ -26,18 +25,11 @@ export async function profileFor(task: AiTask, explicit?: string): Promise<Model
   const id = k ? s.routing[k] : null
   if (id) { const p = await getProfile(id); if (p) return p }
   const all = await listProfiles()
+  // 管理员在服务器上标注了适合哪些任务的，优先用
+  const hinted = k ? all.find((p) => p.routes?.includes(k) && (task !== 'recognize' || p.supports_vision)) : undefined
+  if (hinted) return hinted
   if (task === 'recognize') return all.find((p) => p.supports_vision) ?? null
   return all[0] ?? null
-}
-
-export function endpoint(p: ModelProfile): string {
-  const b = p.base_url.trim().replace(/\/+$/, '')
-  if (p.protocol === 'anthropic') {
-    if (/\/messages$/.test(b)) return b
-    return /\/v1$/.test(b) ? b + '/messages' : b + '/v1/messages'
-  }
-  if (/\/chat\/completions$/.test(b)) return b
-  return b + '/chat/completions'
 }
 
 function splitDataUrl(u: string) {
@@ -78,7 +70,7 @@ function buildBody(p: ModelProfile, o: CallOpts): Record<string, unknown> {
 interface RawResp { status: number; body: string }
 
 async function send(p: ModelProfile, body: Record<string, unknown>): Promise<RawResp> {
-  return invoke<RawResp>('llm_request', { req: { profileId: p.id, protocol: p.protocol, url: endpoint(p), body: JSON.stringify(body), timeoutS: p.timeout_s, needsKey: p.needs_key } })
+  return llm(p.id, body)
 }
 
 /** 400 错误里提到不支持的参数时，自动调整并记住（不同服务、不同模型对参数的要求不一样） */
@@ -106,7 +98,7 @@ function parseResp(p: ModelProfile, body: string) {
 function errMessage(status: number, body: string): string {
   let msg = body.slice(0, 300)
   try { const j = JSON.parse(body); msg = j.error?.message ?? j.message ?? msg } catch { /* 原样 */ }
-  if (status === 401 || status === 403) return `API Key 无效或没有权限（${status}）：${msg}`
+  if (status === 401 || status === 403) return `模型服务拒绝了请求（${status}），请联系管理员检查服务器上的 Key：${msg}`
   if (status === 404) return `接口地址或模型名不对（404）：${msg}`
   if (status === 429) return `请求太频繁或额度用完（429）：${msg}`
   if (status === 0) return `网络请求失败：${msg}`
@@ -114,21 +106,23 @@ function errMessage(status: number, body: string): string {
 }
 
 export async function callText(o: CallOpts): Promise<string> {
-  if (!isTauri) {
+  if (__PREVIEW_BUILD__ && isPreview) {
     await new Promise((r) => setTimeout(r, 500))
+    const { mockReply } = await import('./mock')
     const m = mockReply(o.task, o.mockData, !o.json)
     return typeof m === 'string' ? m : JSON.stringify(m)
   }
   let p = await profileFor(o.task, o.profileId)
-  if (!p) throw new AiError('还没有配置模型。请到「设置 → 模型」添加一个。')
+  if (!p) throw new AiError('服务器上还没有可用的模型，请联系管理员配置。')
   const hasImage = o.messages.some((m) => typeof m.content !== 'string' && m.content.some((c) => c.type === 'image'))
-  if (hasImage && !p.supports_vision) throw new AiError(`「${p.name}」没有勾选"支持图片"。截图识别需要视觉模型，请在设置里换一个或勾选。`)
+  if (hasImage && !p.supports_vision) throw new AiError(`「${p.name}」不支持图片。截图识别需要视觉模型，请在设置里换一个。`)
   for (let attempt = 0; attempt < 4; attempt++) {
     const t0 = performance.now()
     let r: RawResp
     try { r = await send(p, buildBody(p, o)) } catch (e) {
       await logCall({ task: o.task, profile_name: p.name, model: p.model, latency_ms: Math.round(performance.now() - t0), ok: false, error: String(e) })
-      throw new AiError(`网络请求失败：${String(e)}`)
+      // 服务器自己的提示（次数用完、太频繁等）原样给用户看
+      throw new AiError(e instanceof ApiError ? e.message : `网络请求失败：${String(e)}`)
     }
     const ms = Math.round(performance.now() - t0)
     if (r.status >= 200 && r.status < 300) {

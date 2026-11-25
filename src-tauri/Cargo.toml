@@ -1,6 +1,6 @@
 [package]
 name = "fupan-bianqian"
-version = "0.1.0"
+version = "0.2.0"
 description = "复盘便签：把每次不愉快练成下次的好反应"
 edition = "2021"
 rust-version = "1.77"
@@ -14,17 +14,17 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
-tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-notification = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# 大模型请求在 Rust 端发出：读取系统凭据里的 Key，前端拿不到；也不受浏览器跨域限制
+# 和服务器通信在 Rust 端发出：登录令牌存在系统凭据里，前端脚本拿不到；也不受浏览器跨域限制
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "http2", "charset"] }
 # 固定 3.x：4.x 改成了 keyring-core 体系，API 不同
 keyring = { version = "3", features = ["windows-native", "apple-native"] }
 url = "2"
+base64 = "0.22"
 
 [profile.release]
 codegen-units = 1

@@ -1,24 +1,33 @@
 {
   "name": "lovememo",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Turn relationship conflicts into growth steps with AI-powered review and spaced repetition",
   "repository": {
     "type": "git",
     "url": "https://github.com/exqs/LoveMemo.git"
   },
-  "keywords": ["relationship", "ai", "spaced-repetition", "tauri", "react"],
+  "keywords": [
+    "relationship",
+    "ai",
+    "spaced-repetition",
+    "tauri",
+    "react"
+  ],
   "author": "LoveMemo Contributors",
   "license": "MIT",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "vitest run && node --disable-warning=ExperimentalWarning --test --test-concurrency=1 \"server/test/*.test.ts\"",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "test:server": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 \"server/test/*.test.ts\"",
+    "server": "node server/src/main.ts",
+    "server:dev": "node scripts/dev-server.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -27,7 +36,6 @@
     "@tauri-apps/api": "^2.12.5",
     "@tauri-apps/plugin-autostart": "^2.7.0",
     "@tauri-apps/plugin-notification": "^2.8.1",
-    "@tauri-apps/plugin-sql": "^2.6.0",
     "echarts": "^5.6.0",
     "echarts-wordcloud": "^2.1.0",
     "lucide-react": "^1.78.0",
@@ -53,6 +61,6 @@
     "vitest": "^5.1.1"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.18"
   }
 }

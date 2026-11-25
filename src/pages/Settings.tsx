@@ -1,32 +1,19 @@
 // 设置（PRD F10、F12）：基本信息、模型、复习、提醒、数据
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Download, KeyRound, PlugZap, Plus, Trash2, Upload } from 'lucide-react'
+import { Download, KeyRound, LogOut, PlugZap, Plus, Trash2, Upload } from 'lucide-react'
 import { Page } from '../components/Page'
-import { Button, Chip, Field, Modal, Sheet, Spinner, confirmDialog, cx, errText, inputCls, toast } from '../components/ui'
+import { Button, Chip, Field, Sheet, Spinner, confirmDialog, cx, errText, inputCls, toast } from '../components/ui'
 import { useLoad, useSettings } from '../db/base'
-import { resetPreviewDb } from '../db/db'
+import { discardRemote, flushSave } from '../db/db'
 import { addTag, deleteTag, listTags } from '../db/rules'
-import { deleteProfile, exportAll, importAll, listProfiles, saveProfile, usageSummary } from '../db/misc'
+import { exportAll, importAll, listProfiles, usageSummary } from '../db/misc'
 import { testProfile } from '../ai/client'
-import { autostartEnabled, deleteSecret, hasSecret, isTauri, saveToDownloads, setAutostart, setSecret } from '../lib/platform'
+import { autostartEnabled, isTauri, saveToDownloads, setAutostart } from '../lib/platform'
+import { changePassword, isPreview, logoutAll, sessions } from '../lib/api'
+import { useSession } from '../lib/session'
 import type { ModelProfile, RouteKey, Settings } from '../lib/types'
-import { fmtDate, uid } from '../lib/util'
+import { fmtDate } from '../lib/util'
 
-interface Preset { name: string; protocol: 'openai' | 'anthropic'; base_url: string; model: string; placeholder?: string; vision: boolean; needs_key: boolean; max_tokens: number; quirks?: ModelProfile['quirks']; note?: string }
-// 不内置具体模型名的地方，由你填写当前可用的模型
-const PRESETS: Preset[] = [
-  { name: 'OpenAI（GPT）', protocol: 'openai', base_url: 'https://api.openai.com/v1', model: '', placeholder: '填写你要用的 GPT 模型名', vision: true, needs_key: true, max_tokens: 16000, quirks: { maxCompletionTokens: true } },
-  { name: 'DeepSeek', protocol: 'openai', base_url: 'https://api.deepseek.com', model: 'deepseek-flash', vision: false, needs_key: true, max_tokens: 8192, note: '官方文档：deepseek-flash 目前由 V4.1-Flash 提供，旧名 deepseek-v4-flash 仍可用。是否支持图片请用"测试连接"确认。' },
-  { name: 'Claude（Anthropic）', protocol: 'anthropic', base_url: 'https://api.anthropic.com', model: 'claude-opus-5-5', vision: true, needs_key: true, max_tokens: 16000, quirks: { noTemperature: true }, note: 'Opus 5.5 的思考始终开启，回复里只取文字部分；输出上限留得比较大。' },
-  { name: '通义千问', protocol: 'openai', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: '', vision: true, needs_key: true, max_tokens: 8192 },
-  { name: 'Kimi', protocol: 'openai', base_url: 'https://api.moonshot.cn/v1', model: '', vision: false, needs_key: true, max_tokens: 8192 },
-  { name: '智谱', protocol: 'openai', base_url: 'https://open.bigmodel.cn/api/paas/v4', model: '', vision: false, needs_key: true, max_tokens: 8192 },
-  { name: '硅基流动', protocol: 'openai', base_url: 'https://api.siliconflow.cn/v1', model: '', vision: false, needs_key: true, max_tokens: 8192 },
-  { name: 'OpenRouter', protocol: 'openai', base_url: 'https://openrouter.ai/api/v1', model: '', vision: false, needs_key: true, max_tokens: 8192 },
-  { name: 'Ollama（本机）', protocol: 'openai', base_url: 'http://localhost:11434/v1', model: '', vision: false, needs_key: false, max_tokens: 8192, note: '本机模型，聊天记录不出电脑。' },
-  { name: 'LM Studio（本机）', protocol: 'openai', base_url: 'http://localhost:1234/v1', model: '', vision: false, needs_key: false, max_tokens: 8192 },
-  { name: '自定义', protocol: 'openai', base_url: '', model: '', vision: false, needs_key: true, max_tokens: 8192 },
-]
 const ROUTES: [RouteKey, string, string][] = [
   ['recognize', '截图识别', '需要支持图片'], ['analyze', '复盘分析和知识点归属', '建议用最强的'], ['quiz', '出题和评分', ''], ['roleplay', '角色扮演', '可以用便宜的快模型'],
 ]
@@ -37,6 +24,7 @@ export default function SettingsPage() {
   return (
     <Page narrow title="设置">
       <div className="space-y-5">
+        <Account />
         <Basic s={s} save={save} />
         <Models s={s} save={save} />
         <ReviewSet s={s} save={save} />
@@ -79,34 +67,34 @@ function Basic({ s, save }: P) {
 }
 
 function Models({ s, save }: P) {
-  const [profiles, reload] = useLoad(listProfiles)
+  const [profiles] = useLoad(listProfiles)
   const [usage] = useLoad(usageSummary)
-  const [edit, setEdit] = useState<ModelProfile | null>(null)
-  const [keys, setKeys] = useState<Record<string, boolean>>({})
-  useEffect(() => { (profiles ?? []).forEach((p) => hasSecret(p.id).then((h) => setKeys((k) => ({ ...k, [p.id]: h })))) }, [profiles])
-  const fromPreset = (pr: Preset): ModelProfile => ({
-    id: uid(), name: pr.name.replace(/（.*）/, ''), protocol: pr.protocol, base_url: pr.base_url, model: pr.model, supports_vision: pr.vision, supports_json: true,
-    temperature: null, max_tokens: pr.max_tokens, timeout_s: 120, needs_key: pr.needs_key, quirks: pr.quirks ?? {}, price_in: null, price_out: null, created_at: 0,
-  })
+  const [test, setTest] = useState<Record<string, { busy?: boolean; ok?: boolean; text?: string }>>({})
+  const runTest = async (p: ModelProfile) => {
+    setTest((t) => ({ ...t, [p.id]: { busy: true } }))
+    try {
+      const r = await testProfile(p)
+      setTest((t) => ({ ...t, [p.id]: { ok: true, text: `连接正常，耗时 ${r.ms}ms。${r.vision === undefined ? '' : r.vision ? '图片识别正常。' : '没能识别测试图片。'}` } }))
+    } catch (e) { setTest((t) => ({ ...t, [p.id]: { ok: false, text: errText(e) } })) }
+  }
   return (
-    <Section title="模型" hint="可以配多个，再按任务分配。API Key 存在 Windows 凭据管理器里，不进数据库">
-      {!isTauri && <p className="text-xs text-warn mb-3">浏览器预览不会真正调用模型，所有 AI 结果都是模拟内容。</p>}
-      <div className="space-y-2 mb-3">
+    <Section title="模型" hint="模型和 API Key 由管理员在服务器上统一配置，Key 只存在服务器上，浏览器和电脑里都没有。这里可以按任务选用哪个模型">
+      <div className="space-y-2 mb-4">
         {(profiles ?? []).map((p) => (
-          <div key={p.id} className="flex items-center gap-3 rounded-lg border border-rule px-3 py-2.5">
-            <div className="flex-1 min-w-0">
-              <p className="font-medium">{p.name} <span className="text-ink-faint font-normal text-sm">{p.model}</span></p>
-              <p className="text-xs text-ink-faint truncate">{p.protocol === 'anthropic' ? 'Anthropic 协议' : 'OpenAI 兼容'} · {p.base_url}</p>
+          <div key={p.id} className="rounded-lg border border-rule px-3 py-2.5">
+            <div className="flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="font-medium">{p.name} <span className="text-ink-faint font-normal text-sm">{p.model}</span></p>
+                <p className="text-xs text-ink-faint">{p.protocol === 'anthropic' ? 'Anthropic 协议' : 'OpenAI 兼容'}</p>
+              </div>
+              {p.supports_vision && <Chip tone="ok">支持图片</Chip>}
+              <Button size="sm" disabled={test[p.id]?.busy} onClick={() => runTest(p)}><PlugZap size={13} />测试</Button>
             </div>
-            {p.supports_vision && <Chip tone="ok">支持图片</Chip>}
-            {p.needs_key && !keys[p.id] && <Chip tone="red">没有 Key</Chip>}
-            <Button size="sm" onClick={() => setEdit(p)}>编辑</Button>
+            {test[p.id]?.busy && <div className="mt-2"><Spinner label="测试中…" /></div>}
+            {test[p.id]?.text && <p className={cx('text-xs mt-2', test[p.id].ok ? 'text-ok' : 'text-red')}>{test[p.id].text}</p>}
           </div>
         ))}
-        {!profiles?.length && <p className="text-sm text-ink-faint">还没有模型。选一个服务商开始：</p>}
-      </div>
-      <div className="flex flex-wrap gap-1.5 mb-5">
-        {PRESETS.map((pr) => <Chip key={pr.name} onClick={() => setEdit(fromPreset(pr))}><Plus size={11} className="mr-0.5" />{pr.name}</Chip>)}
+        {profiles && !profiles.length && <p className="text-sm text-ink-faint">服务器上还没有可用的模型。请联系管理员在服务器的 models.json 里配置。</p>}
       </div>
 
       {!!profiles?.length && (
@@ -114,7 +102,7 @@ function Models({ s, save }: P) {
           {ROUTES.map(([k, label, hint]) => (
             <Field key={k} label={label} hint={hint}>
               <select className={inputCls} value={s.routing[k] ?? ''} onChange={(e) => save({ routing: { ...s.routing, [k]: e.target.value || null } })}>
-                <option value="">自动（{k === 'recognize' ? '第一个支持图片的' : '第一个'}）</option>
+                <option value="">自动（管理员推荐的）</option>
                 {profiles.filter((p) => k !== 'recognize' || p.supports_vision).map((p) => <option key={p.id} value={p.id}>{p.name} · {p.model}</option>)}
               </select>
             </Field>
@@ -135,66 +123,53 @@ function Models({ s, save }: P) {
           </table>
         </div>
       )}
-      {edit && <ProfileModal p={edit} hasKey={!!keys[edit.id]} onClose={() => { setEdit(null); reload() }} />}
     </Section>
   )
 }
 
-function ProfileModal({ p: init, hasKey, onClose }: { p: ModelProfile; hasKey: boolean; onClose: () => void }) {
-  const [p, setP] = useState(init)
-  const [key, setKey] = useState('')
-  const [test, setTest] = useState<{ busy?: boolean; ok?: boolean; text?: string }>({})
-  const preset = PRESETS.find((x) => x.base_url && x.base_url === p.base_url)
-  const set = (x: Partial<ModelProfile>) => setP({ ...p, ...x })
-  const valid = p.name.trim() && p.base_url.trim() && p.model.trim() && /^https?:\/\//.test(p.base_url.trim())
-  const persist = async () => {
-    await saveProfile({ ...p, name: p.name.trim(), base_url: p.base_url.trim(), model: p.model.trim() })
-    if (key.trim()) await setSecret(p.id, key.trim())
-    setKey('')
-  }
-  const runTest = async () => {
-    await persist()
-    setTest({ busy: true })
-    try {
-      const r = await testProfile(p)
-      setTest({ ok: true, text: `连接成功，耗时 ${r.ms}ms。${r.vision === undefined ? '' : r.vision ? '图片识别正常。' : '没能识别测试图片，可能不支持图片，建议取消勾选"支持图片"。'}` })
-    } catch (e) { setTest({ ok: false, text: errText(e) }) }
+/** 账号：修改密码、登录设备、退出 */
+function Account() {
+  const { user, logout } = useSession()
+  const [cur, setCur] = useState('')
+  const [next, setNext] = useState('')
+  const [next2, setNext2] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [list, setList] = useState<Awaited<ReturnType<typeof sessions>>['sessions']>()
+  const loadSessions = () => { sessions().then((r) => setList(r.sessions)).catch(() => {}) }
+  useEffect(() => { if (!isPreview) loadSessions() }, [])
+  if (isPreview) return null
+  const change = async () => {
+    if (next !== next2) { toast('两次输入的新密码不一样', 'err'); return }
+    setBusy(true)
+    try { await changePassword(cur, next); setCur(''); setNext(''); setNext2(''); toast('密码改好了，其他设备已经退出登录'); loadSessions() } catch (e) { toast(errText(e), 'err') } finally { setBusy(false) }
   }
   return (
-    <Modal open onClose={onClose} title={init.created_at ? '编辑模型' : '添加模型'} wide
-      footer={<>
-        {init.created_at > 0 && <Button kind="danger" className="mr-auto" onClick={async () => { if (await confirmDialog(`删除「${p.name}」？Key 也会一起删除。`, '删除', true)) { await deleteSecret(p.id); await deleteProfile(p.id); onClose() } }}><Trash2 size={14} />删除</Button>}
-        <Button onClick={runTest} disabled={!valid || test.busy}><PlugZap size={14} />保存并测试连接</Button>
-        <Button kind="primary" disabled={!valid} onClick={async () => { await persist(); toast('已保存'); onClose() }}>保存</Button>
-      </>}>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="名称"><input className={inputCls} value={p.name} onChange={(e) => set({ name: e.target.value })} /></Field>
-        <Field label="接口协议">
-          <select className={inputCls} value={p.protocol} onChange={(e) => set({ protocol: e.target.value as ModelProfile['protocol'] })}>
-            <option value="openai">OpenAI 兼容（Chat Completions）</option><option value="anthropic">Anthropic（Messages）</option>
-          </select>
-        </Field>
-        <Field label="API 端点（Base URL）" className="col-span-2" hint="填到 /v1 为止即可，也可以填完整的 …/chat/completions"><input className={inputCls} value={p.base_url} onChange={(e) => set({ base_url: e.target.value })} placeholder="https://…" /></Field>
-        <Field label="模型名"><input className={inputCls} value={p.model} onChange={(e) => set({ model: e.target.value })} placeholder={PRESETS.find((x) => x.base_url === p.base_url)?.placeholder ?? '例如 deepseek-flash'} /></Field>
-        <Field label="API Key" hint={!p.needs_key ? '本机模型不需要' : hasKey ? '已保存。留空表示不修改' : '保存后存进 Windows 凭据管理器'}>
-          <div className="relative"><KeyRound size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint" />
-            <input type="password" autoComplete="off" disabled={!p.needs_key} className={cx(inputCls, 'pl-8')} value={key} onChange={(e) => setKey(e.target.value)} placeholder={hasKey ? '••••••••' : 'sk-…'} /></div>
-        </Field>
-        <div className="col-span-2 flex flex-wrap gap-x-5 gap-y-2 text-sm">
-          <label className="flex items-center gap-1.5"><input type="checkbox" checked={p.supports_vision} onChange={(e) => set({ supports_vision: e.target.checked })} />支持图片（截图识别需要）</label>
-          <label className="flex items-center gap-1.5"><input type="checkbox" checked={p.supports_json} onChange={(e) => set({ supports_json: e.target.checked })} />支持 JSON 输出模式</label>
-          <label className="flex items-center gap-1.5"><input type="checkbox" checked={!p.needs_key} onChange={(e) => set({ needs_key: !e.target.checked })} />不需要 Key</label>
-        </div>
-        <Field label="最大输出 token"><input type="number" className={inputCls} value={p.max_tokens} onChange={(e) => set({ max_tokens: Number(e.target.value) || 4096 })} /></Field>
-        <Field label="超时（秒）"><input type="number" className={inputCls} value={p.timeout_s} onChange={(e) => set({ timeout_s: Number(e.target.value) || 120 })} /></Field>
-        <Field label="输入单价（元 / 百万 token，可选）"><input type="number" step="0.01" className={inputCls} value={p.price_in ?? ''} onChange={(e) => set({ price_in: e.target.value === '' ? null : Number(e.target.value) })} /></Field>
-        <Field label="输出单价（元 / 百万 token，可选）"><input type="number" step="0.01" className={inputCls} value={p.price_out ?? ''} onChange={(e) => set({ price_out: e.target.value === '' ? null : Number(e.target.value) })} /></Field>
+    <Section title="账号" hint={`当前登录：${user.username}${user.role === 'superadmin' ? '（管理员）' : ''}`}>
+      <div className="grid grid-cols-3 gap-3 mb-2">
+        <Field label="当前密码"><input type="password" autoComplete="current-password" className={inputCls} value={cur} onChange={(e) => setCur(e.target.value)} /></Field>
+        <Field label="新密码" hint="至少 10 位"><input type="password" autoComplete="new-password" className={inputCls} value={next} onChange={(e) => setNext(e.target.value)} /></Field>
+        <Field label="再输一次新密码"><input type="password" autoComplete="new-password" className={inputCls} value={next2} onChange={(e) => setNext2(e.target.value)} /></Field>
       </div>
-      {preset?.note && <p className="text-xs text-ink-soft mt-3">{preset.note}</p>}
-      {Object.values(p.quirks).some(Boolean) && <p className="text-xs text-ink-faint mt-2">已自动适配：{[p.quirks.noTemperature && '不发送温度参数', p.quirks.maxCompletionTokens && '用 max_completion_tokens', p.quirks.noResponseFormat && '不用 JSON 模式参数'].filter(Boolean).join('、')}。<button className="underline" onClick={() => set({ quirks: {} })}>重置</button></p>}
-      {test.busy && <div className="mt-3"><Spinner label="测试中…" /></div>}
-      {test.text && <p className={cx('text-sm mt-3', test.ok ? 'text-ok' : 'text-red')}>{test.text}</p>}
-    </Modal>
+      <Button disabled={busy || !cur || !next || !next2} onClick={change}><KeyRound size={14} />修改密码</Button>
+
+      <p className="text-[13px] text-ink-soft mt-5 mb-1.5">登录过的设备</p>
+      <div className="space-y-1 mb-3">
+        {(list ?? []).map((x, i) => (
+          <p key={i} className="text-xs text-ink-soft">
+            {x.kind === 'desktop' ? '桌面版' : '网页'} · {x.ua.slice(0, 60) || '未知设备'} · 最近使用 {new Date(x.lastSeen).toLocaleString('zh-CN', { hour12: false })} · {x.ip}{x.current && <span className="text-ok"> · 就是这台</span>}
+          </p>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <Button onClick={() => { void logout() }}><LogOut size={14} />退出登录</Button>
+        <Button kind="danger" onClick={async () => {
+          if (!(await confirmDialog('所有设备（包括这台）都会退出登录。如果怀疑密码泄露了，请先改密码再这样做。', '全部退出', true))) return
+          try { await flushSave(); await logoutAll() } catch (e) { toast(errText(e), 'err'); return }
+          discardRemote()
+          location.reload()
+        }}>退出所有设备</Button>
+      </div>
+    </Section>
   )
 }
 
@@ -263,7 +238,7 @@ function Data({ s, save }: P) {
   const [newTag, setNewTag] = useState('')
   const file = useRef<HTMLInputElement>(null)
   return (
-    <Section title="数据" hint="所有数据只存在这台电脑上">
+    <Section title="数据" hint="数据加密保存在你的服务器上，只有登录这个账号才能打开。服务器会保留最近 3 个版本">
       <div className="flex flex-wrap gap-2 mb-3">
         <Button onClick={async () => { try { const path = await saveToDownloads(`复盘便签-备份-${fmtDate(Date.now())}.json`, await exportAll()); toast(`已导出到 ${path}`) } catch (e) { toast(errText(e), 'err') } }}><Download size={14} />导出全部数据</Button>
         <Button onClick={() => file.current?.click()}><Upload size={14} />从备份导入</Button>
@@ -271,15 +246,14 @@ function Data({ s, save }: P) {
           const f = e.target.files?.[0]; e.target.value = ''
           if (!f) return
           if (!(await confirmDialog('导入会覆盖当前所有数据（便签、知识点、复习进度、设置）。\n建议先导出一份当前数据。确定导入吗？', '覆盖并导入', true))) return
-          try { await importAll(await f.text()); toast('导入完成'); setTimeout(() => location.reload(), 600) } catch (err) { toast(errText(err), 'err') }
+          try { await importAll(await f.text()); await flushSave(); toast('导入完成'); setTimeout(() => location.reload(), 600) } catch (err) { toast(errText(err), 'err') }
         }} />
-        {!isTauri && <Button kind="danger" onClick={async () => { if (await confirmDialog('清空浏览器预览里的全部数据？', '清空', true)) { await resetPreviewDb(); location.reload() } }}>清空预览数据</Button>}
       </div>
-      <div className="flex items-center gap-2 text-sm mb-4">
-        自动备份：每
+      {isTauri && <div className="flex items-center gap-2 text-sm mb-4">
+        在这台电脑上额外自动备份：每
         <input type="number" min={0} max={60} className={cx(inputCls, 'w-16 py-1')} value={s.autoBackupDays} onChange={(e) => save({ autoBackupDays: Math.max(0, Number(e.target.value) || 0) })} />
         天一次，保留最近 5 份（0 为关闭）。{s.lastBackupAt ? `上次：${fmtDate(s.lastBackupAt)}` : ''}
-      </div>
+      </div>}
       <p className="text-[13px] text-ink-soft mb-1.5">标签库</p>
       <div className="flex flex-wrap gap-1.5 mb-2">
         {(tags ?? []).map((t) => (
